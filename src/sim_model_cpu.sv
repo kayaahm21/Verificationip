@@ -11,9 +11,6 @@ module sim_model_cpu #(
 
     output logic                     user_clk,           // 125 MHz
     output logic                     user_reset,         // aktif yuksek
-    output logic                     user_lnk_up,
-    output logic                     phy_rdy_out,
-    output logic [4:0]               cfg_local_error_out,
 
     // CQ: VIP -> tasarim
     output logic [255:0]             m_axis_cq_tdata,
@@ -43,18 +40,16 @@ module sim_model_cpu #(
     // ---- clock / reset / link ----
     initial begin user_clk = 1'b0; forever #4 user_clk = ~user_clk; end   // 125 MHz
 
+    logic user_lnk_up;   // sadece dahili: driver'i reset + link sonrasi baslatir
+
     initial begin
         user_reset  = 1'b1;
         user_lnk_up = 1'b0;
-        phy_rdy_out = 1'b0;
         repeat (20) @(posedge user_clk);
         user_reset  = 1'b0;
         repeat (20) @(posedge user_clk);
         user_lnk_up = 1'b1;
-        phy_rdy_out = 1'b1;
     end
-
-    assign cfg_local_error_out = '0;
 
     // ---- RQ sink ----
     assign s_axis_rq_tready = 1'b1;

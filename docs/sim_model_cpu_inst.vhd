@@ -9,9 +9,6 @@ begin
 
         user_clk                => clk_user_cpu_pcie,
         user_reset              => rst_user_cpu_pcie,
-        user_lnk_up             => cdc_lnk_up_cpu_pcie,
-        phy_rdy_out             => cdc_cpu_pcie_phy_rdy_out,
-        cfg_local_error_out     => ila_debug_cpu_cfg_local_error_out,
 
         s_axis_rq_tdata         => cdc_cpu_s_axis_rq.tdata,
         s_axis_rq_tkeep         => buf_cpu_s_axis_rq_tkeep,

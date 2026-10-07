@@ -115,8 +115,6 @@ Descriptor alanları:
 | `sys_clk` | in | Dışarıdan gelir; VIP içinde kullanılmıyor |
 | `user_clk` | out | 125 MHz (8 ns periyot) |
 | `user_reset` | out | Aktif yüksek; başlangıçta 20 clock reset |
-| `user_lnk_up`, `phy_rdy_out` | out | Reset'ten 20 clock sonra 1 |
-| `cfg_local_error_out[4:0]` | out | 0'a sabit |
 | `m_axis_cq_tdata[255:0]`, `tkeep[7:0]`, `tlast`, `tuser[87:0]`, `tvalid` | out | CQ: VIP → tasarım |
 | `m_axis_cq_tready` | in | Tasarımdan |
 | `s_axis_rq_tdata[255:0]`, `tkeep[7:0]`, `tlast`, `tuser[61:0]`, `tvalid` | in | RQ: tasarım → VIP |
@@ -127,14 +125,14 @@ Descriptor alanları:
 
 Parametreler: `INPUT_FILE`, `CQ_KEEP_WIDTH` (8), `RQ_KEEP_WIDTH` (8).
 
-Gerçek IP'nin diğer tüm portları (`pci_exp_*`, `cfg_*` çoğu, `m_axis_rc_*`, `s_axis_cc_*`, `pcie_rq_*`, …)
+Gerçek IP'nin diğer tüm portları (`pci_exp_*`, `user_lnk_up`, `phy_rdy_out`, `cfg_local_error_out`, `cfg_*` çoğu, `m_axis_rc_*`, `s_axis_cc_*`, `pcie_rq_*`, …)
 **bilinçli olarak kaldırılmıştır**; VHDL instantiation'ı buna göre kısaltılmıştır.
 
 ### Başlangıç sekansı
 ```
 t=0            user_reset=1, link_up=0
 +20 clock      user_reset=0
-+20 clock      user_lnk_up=1, phy_rdy_out=1  → driver.reset() döner
++20 clock      dahili link_up=1  → driver.reset() döner
 sonra          driver.run() arka planda başlar, generator.run() dosyayı okuyup mailbox'a koyar
 ```
 
@@ -142,8 +140,9 @@ sonra          driver.run() arka planda başlar, generator.run() dosyayı okuyup
 
 1. Dosyaları `xil_defaultlib`'e SystemVerilog olarak ekle (sıra: bölüm 2).
 2. VHDL'deki yorum satırlı `gen_sim_model_cpu` bloğunu `docs/sim_model_cpu_inst.vhd` ile değiştir.
-3. `clk_user_cpu_pcie`, `rst_user_cpu_pcie` ve `cdc_lnk_up_cpu_pcie` sinyallerinin başka bir yerden sürülmediğini kontrol et
-   (artık VIP sürüyor).
+3. `clk_user_cpu_pcie` ve `rst_user_cpu_pcie` sinyallerinin başka bir yerden sürülmediğini kontrol et (artık VIP sürüyor).
+   `cdc_lnk_up_cpu_pcie`, `cdc_cpu_pcie_phy_rdy_out` ve `ila_debug_cpu_cfg_local_error_out` artık VIP tarafından sürülmüyor;
+   tasarım bunları kullanıyorsa VHDL'de sabit değer ata.
 4. `buf_cpu_m_axis_cq_tkeep` ve `buf_cpu_s_axis_rq_tkeep` genişliği 8 bit olmalı.
 5. Veri dosyası için `+TLP_FILE=...` veya `INPUT_FILE` kullan; dosya simülasyon çalışma dizininde olmalı.
 
