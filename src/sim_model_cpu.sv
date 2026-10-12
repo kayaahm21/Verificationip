@@ -24,7 +24,7 @@ module sim_model_cpu #(
     input  logic [255:0]             s_axis_rq_tdata,
     input  logic [RQ_KEEP_WIDTH-1:0] s_axis_rq_tkeep,
     input  logic                     s_axis_rq_tlast,
-    output logic                     s_axis_rq_tready,
+    output logic [3:0]               s_axis_rq_tready,
     input  logic [61:0]              s_axis_rq_tuser,
     input  logic                     s_axis_rq_tvalid,
 
@@ -52,7 +52,7 @@ module sim_model_cpu #(
     end
 
     // ---- RQ sink ----
-    assign s_axis_rq_tready = 1'b1;
+    assign s_axis_rq_tready = 4'hF;
 
     // ---- MSI cevabi: int geldikten 2 clk sonra sent ----
     assign cfg_interrupt_msi_fail = 1'b0;

@@ -118,7 +118,7 @@ Descriptor alanları:
 | `m_axis_cq_tdata[255:0]`, `tkeep[7:0]`, `tlast`, `tuser[87:0]`, `tvalid` | out | CQ: VIP → tasarım |
 | `m_axis_cq_tready` | in | Tasarımdan |
 | `s_axis_rq_tdata[255:0]`, `tkeep[7:0]`, `tlast`, `tuser[61:0]`, `tvalid` | in | RQ: tasarım → VIP |
-| `s_axis_rq_tready` | out | Her zaman 1 |
+| `s_axis_rq_tready[3:0]` | out | Her zaman 4'hF (gerçek IP gibi 4 bit) |
 | `cfg_interrupt_msi_int[31:0]` | in | MSI isteği |
 | `cfg_interrupt_msi_sent` | out | `msi_int` sıfırdan farklıysa 2 clock sonra 1 |
 | `cfg_interrupt_msi_fail` | out | 0'a sabit |
