@@ -1,6 +1,7 @@
 # PCIe CQ VIP (UltraScale+ IP yerine simülasyon modeli)
 
-> **Yeni sürüm:** senaryo destekli [verification_v1.0.2/](verification_v1.0.2/) klasörüne bakın. Bu dizindeki kod v1.0.1'dir.
+> **Yeni sürümler:** senaryo destekli [verification_v1.0.2/](verification_v1.0.2/) ve FPGA→CPU işlemci modelli
+> [verification_v1.0.3/](verification_v1.0.3/) (en güncel). Bu dizindeki kod v1.0.1'dir.
 
 Radar sistemi doğrulaması için, gerçek **Xilinx UltraScale+ PCIe IP**'sinin yerine konan
 SystemVerilog tabanlı bir VIP (Verification IP). VIP, bir metin dosyasındaki mesajları

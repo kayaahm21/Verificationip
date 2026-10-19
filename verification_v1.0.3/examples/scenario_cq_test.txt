@@ -1,0 +1,9 @@
+# CQ (CPU->FPGA) yonu regresyon senaryosu: HB, bekleme ve birden cok beat'lik TLP
+# (tb/tb_cq_check.sv bu dosyayi kullanir)
+
+77777777 1000                     # 1000 ns sonra HB uret (arka planda)
+99999999                          # HB'yi bekle
+0000000012340000 0000000A 8 11 22 33 44 55 66 77 88
+88888888 400                      # 400 ns bekle
+0000000012340040 0000000B 100 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20 21 22 23 24 25 26 27 28 29 2A 2B 2C 2D 2E 2F 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F 40 41 42 43 44 45 46 47 48 49 4A 4B 4C 4D 4E 4F 50 51 52 53 54 55 56 57 58 59 5A 5B 5C 5D 5E 5F 60 61 62 63
+0000000000001000 0000000C 0       # len=0 mesaj
