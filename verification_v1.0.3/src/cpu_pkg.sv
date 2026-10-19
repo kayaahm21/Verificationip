@@ -310,6 +310,7 @@ package cpu_pkg;
             mem.write_field(p, 8, b, ptr_be);
             $display("[%0t] [CPU] buffer programlandi: base=%h size=%0d ptr_adresi=%h", $time, b, s, p);
             $fdisplay(trace_fd, "[%0t] CFG base=%h size=%0d ptr_addr=%h", $time, b, s, p);
+            $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
         endfunction
 
         // ------------------------------------------------------------
@@ -324,6 +325,7 @@ package cpu_pkg;
             tlp_count++;
             $fdisplay(trace_fd, "[%0t] RQ %s addr=%h dw=%0d first_be=%b last_be=%b",
                       $time, p.type_name(), p.addr, p.dw_count, p.first_be, p.last_be);
+            $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
 
             if (p.req_type != REQ_TYPE_MEMWR) begin
                 $warning("[CPU] %s desteklenmiyor (FPGA'nin sadece MemWr gondermesi bekleniyor), atildi.",
@@ -359,6 +361,7 @@ package cpu_pkg;
                 wrap_events++;
                 $warning("[CPU] TLP buffer sonunu asti (addr=%h), tasan kisim basa sarildi.", p.addr);
                 $fdisplay(trace_fd, "[%0t]   !! buffer sonu asildi, basa sarildi", $time);
+                $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
             end
 
             // Pointer bolgesine yazildiysa degeri ogren ve kaydet
@@ -367,6 +370,7 @@ package cpu_pkg;
                 ptr_updates++;
                 pv = mem.read_field(buffer.ptr_addr, ptr_width, ptr_be);
                 $fdisplay(trace_fd, "[%0t]   pointer guncellendi: %h (%0d bayt)", $time, pv, ptr_width);
+                $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
             end
         endfunction
 
@@ -398,6 +402,7 @@ package cpu_pkg;
             if (newp == buffer.last_ptr) begin
                 spurious_isr++;
                 $fdisplay(trace_fd, "[%0t] ISR #%0d: yeni veri yok (pointer=%h)", $time, isr_count, newp);
+                $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
                 return;
             end
 
@@ -435,6 +440,7 @@ package cpu_pkg;
             $display("[%0t] [CPU] ISR #%0d: %0d mesaj okundu (pointer=%h)", $time, isr_count, nmsg, newp);
             $fdisplay(trace_fd, "[%0t] ISR #%0d: pointer=%h, %0d mesaj okundu, last_ptr=%h",
                       $time, isr_count, newp, nmsg, buffer.last_ptr);
+            $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
         endfunction
 
         // pos'tan itibaren (off. bayttan) n baytlik alani, buffer sarmasiyla okur

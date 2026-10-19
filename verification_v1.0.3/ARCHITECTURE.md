@@ -314,4 +314,4 @@ Sınırlar:
 - `99999999` için zaman aşımı yok; HB gelmezse senaryo orada bekler.
 - Üç özel adres değeri (`99999999`, `88888888`, `77777777`) gerçek TLP adresi olarak kullanılamaz.
 - PG213 ile doğrulanması gerekenler: RQ/CQ `tuser` bit konumları, `byte_en` ve parity düzeni.
-- Dosyaya yazma anlık (`$fflush`); simülasyon `$finish` olmadan bitse de `cpu_out.txt` eksiksizdir.
+- Dosyaya yazma anlık (`$fflush`): hem `cpu_out.txt` hem `rq_trace.txt` her yazımdan sonra diske boşaltılır; simülasyon açıkken (`run 2 us` gibi) de okunabilir.
