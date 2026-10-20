@@ -246,6 +246,10 @@ package cpu_pkg;
         int unsigned wrap_events;
         int unsigned ptr_updates;
         int unsigned error_count;
+        int unsigned overrun_count;   // okunmamis verinin ustune yazma (buffer tasmasi) olay sayisi
+
+        longint unsigned unread_bytes;  // buffer'a yazilmis ama ISR'nin henuz okumadigi bayt sayisi
+        bit              overrun_flag;  // tasma durumu devam ediyor (ayni olayi tekrar saymamak icin)
 
         function new(string out_file = "cpu_out.txt", string trace_file = "rq_trace.txt",
                      bit cfg_be = 1'b0, bit ptr_be = 1'b0, bit msg_be = 1'b0,
@@ -261,6 +265,7 @@ package cpu_pkg;
             this.ptr_width  = 8;
             this.tlp_count = 0; this.msg_count = 0; this.isr_count = 0;
             this.spurious_isr = 0; this.wrap_events = 0; this.ptr_updates = 0; this.error_count = 0;
+            this.overrun_count = 0; this.unread_bytes = 0; this.overrun_flag = 1'b0;
             out_fd   = $fopen(out_file, "w");
             trace_fd = $fopen(trace_file, "w");
             if (out_fd == 0)   $fatal(1, "[CPU] cikti dosyasi acilamadi: %s", out_file);
@@ -306,6 +311,8 @@ package cpu_pkg;
             buffer.last_ptr = b;
             buffer.valid    = 1'b1;
             ptr_width       = 8;
+            unread_bytes    = 0;
+            overrun_flag    = 1'b0;
             // Islemci pointer bolgesini baslangic degeriyle hazirlar (pointer = buffer basi)
             mem.write_field(p, 8, b, ptr_be);
             $display("[%0t] [CPU] buffer programlandi: base=%h size=%0d ptr_adresi=%h", $time, b, s, p);
@@ -354,6 +361,21 @@ package cpu_pkg;
                         crossed = 1'b1;
                     end
                     mem.write_byte(a, p.payload[d * 4 + k]);
+                    if (buffer.valid && buffer.contains(a)) unread_bytes++;
+                end
+            end
+
+            // Okunmamis veri buffer boyutunu astiysa FPGA, islemcinin okumadigi verinin ustune yaziyordur
+            if (buffer.valid) begin
+                if (unread_bytes > buffer.size && !overrun_flag) begin
+                    overrun_flag = 1'b1;
+                    overrun_count++;
+                    $warning("[CPU] BUFFER TASTI: okunmamis %0d bayt > buffer boyutu %0d (eski veri ustune yazildi).",
+                             unread_bytes, buffer.size);
+                    $fdisplay(trace_fd, "[%0t]   !! BUFFER TASTI: okunmamis=%0d boyut=%0d", $time, unread_bytes, buffer.size);
+                    $fflush(trace_fd);   // iz dosyasi simulasyon acikken de okunabilsin
+                end else if (unread_bytes <= buffer.size) begin
+                    overrun_flag = 1'b0;
                 end
             end
 
@@ -437,6 +459,8 @@ package cpu_pkg;
             end
 
             buffer.last_ptr = pos;
+            if (consumed >= unread_bytes) unread_bytes = 0;
+            else                          unread_bytes = unread_bytes - consumed;
             $display("[%0t] [CPU] ISR #%0d: %0d mesaj okundu (pointer=%h)", $time, isr_count, nmsg, newp);
             $fdisplay(trace_fd, "[%0t] ISR #%0d: pointer=%h, %0d mesaj okundu, last_ptr=%h",
                       $time, isr_count, newp, nmsg, buffer.last_ptr);
@@ -464,8 +488,8 @@ package cpu_pkg;
         endfunction
 
         function void report();
-            $display("[CPU] ozet: tlp=%0d mesaj=%0d isr=%0d (sahte=%0d) sarma=%0d pointer_yazimi=%0d hata=%0d",
-                     tlp_count, msg_count, isr_count, spurious_isr, wrap_events, ptr_updates, error_count);
+            $display("[CPU] ozet: tlp=%0d mesaj=%0d isr=%0d (sahte=%0d) sarma=%0d pointer_yazimi=%0d tasma=%0d hata=%0d",
+                     tlp_count, msg_count, isr_count, spurious_isr, wrap_events, ptr_updates, overrun_count, error_count);
         endfunction
     endclass
 

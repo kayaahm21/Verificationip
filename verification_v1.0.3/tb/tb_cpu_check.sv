@@ -79,6 +79,7 @@ module tb_cpu_check;
         bit [255:0] word;
         bit [7:0]  keep;
         bit        first;
+        pkt.delete();     // otomatik yerel kuyruk: simulatorlerden bagimsiz olmak icin acikca temizle
         dw0 = {addr[31:2], 2'b00};
         dw1 = addr[63:32];
         dw2 = {16'h0000, 1'b0, REQ_TYPE_MEMWR, 11'(dw)};
@@ -113,6 +114,7 @@ module tb_cpu_check;
     // Pointer degerini (4 veya 8 bayt, little-endian) ptr adresine yazar
     task automatic fpga_ptr(bit [63:0] v, int width);
         bit [7:0] p[$];
+        p.delete();
         for (int i = 0; i < width; i++) p.push_back(v[8*i +: 8]);
         send_rq(PTRA, p);
     endtask
@@ -126,6 +128,7 @@ module tb_cpu_check;
         bit [7:0] m[$];
         bit [7:0] a[$], b[$];
         int       room, total;
+        d.delete(); m.delete(); a.delete(); b.delete();
         for (int i = 0; i < len; i++) d.push_back(8'(id[7:0] + i));
         for (int i = 0; i < 4; i++) m.push_back(id[8*i +: 8]);
         for (int i = 0; i < 4; i++) m.push_back(len[8*i +: 8]);

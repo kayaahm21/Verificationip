@@ -70,6 +70,9 @@ huzme başı (HB) yönetimini yapar.
 | `examples/scenario_example.txt` | örnek | Her komuttan örnek |
 | `examples/scenario_v103.txt` | örnek | Buffer'ı programlayan `1DEA0001` mesajı |
 | `examples/scenario_cq_test.txt` | örnek | `tb_cq_check` senaryosu |
+| `tb/tb_fill_check.sv` | testbench | **(v1.0.3)** buffer doldurma / sarma / taşma testi |
+| `examples/buffer_fill_small.txt`, `buffer_fill_4k.txt`, `scenario_fill_cfg.txt` | örnek | Buffer doldurma senaryoları |
+| `tools/gen_buffer_fill.py` | betik | Buffer doldurma senaryosu üretici |
 | `test/run_verilator.sh`, `test/flatten_for_verilator.py` | betik | Verilator test koşucusu |
 
 **Derleme sırası:** `axis_tx_if.sv` → `beam_if.sv` → `cpu_pkg.sv` → `scn_pkg.sv` → `sim_model_cpu.sv`.
@@ -200,7 +203,14 @@ Tetikleme (`sim_model_cpu` içinde):
 **Pointer "yazma tamamlandı" işaretidir:** veri2 yazılmış ama pointer2 henüz gelmemişse ISR yalnızca pointer'ın
 gösterdiği yere kadar okur; yarım mesaj görmez. Veri bir sonraki kesmede okunur. Kaçan bir kesme veriyi kaybettirmez.
 
-### 5.7 Çıktı dosyaları
+### 5.7 Buffer taşması (overrun) tespiti
+Model, buffer'a yazılan fakat ISR'nin henüz okumadığı baytları sayar (`unread_bytes`). FPGA okunmamış verinin
+üstüne yazarsa (okunmamış bayt > buffer boyutu) `BUFFER TASTI` uyarısı verilir, `overrun_count` artar ve iz dosyasına
+`!! BUFFER TASTI` satırı yazılır. İşlemci FPGA'ya okuma pointer'ı bildirmediği için gerçek sistemde de bu durum
+yalnızca yazılımın yeterince hızlı okumasıyla önlenir; model bu durumu görünür kılar. Taşmadan sonra pointer
+farkı belirsiz olduğundan ISR hatalı mesaj ayrıştırabilir; uyarı bu yüzden önemlidir.
+
+### 5.8 Çıktı dosyaları
 - **`cpu_out.txt`** - her satır bir mesaj, girdi dosyasıyla aynı mantıkta:
   `1DEA0005 0` veya `000000A1 12 A1 A2 A3 ...` (ID 8 haneli hex, LEN onluk, bayt hex).
 - **`rq_trace.txt`** - zaman damgalı iz: programlama (`CFG`), her gelen TLP (tip, adres, DWORD sayısı, byte enable),
@@ -268,6 +278,8 @@ Ayrıntılı örnek: `docs/sim_model_cpu_inst.vhd`. v1.0.2'ye göre **port deği
 | `tb_cpu_check` (FPGA→CPU) | T1 tek mesaj; T2 **birleşmiş kesme** (2 mesaj/1 kesme); T3 buffer sonunda FPGA'nın böldüğü yazma; T4 buffer sonunu aşan tek TLP (sarma); T5 sahte kesme; T6 pointer gelmeden kesme (okunmaz), sonra okunur; T7 `len=0`; T8 8 baytlık pointer; T9 `pointer = base+size` normalleşmesi. Çıktı dosyası 11 satır, beklenenle birebir; sayaçlar kontrol edilir |
 | `tb_cq_check` (CPU→FPGA) | TLP baytları (descriptor/ID/len/payload) bağımsız oluşturulan beklenenle aynı; 1, 4 ve 1 beat'lik TLP'ler; `tready` her 3 clock'ta 1 kez 0 iken veri bozulmuyor; `sop` yalnız ilk beat'te; HB zamanı ~1324 ns; `88888888 400` aralığı 400..440 ns |
 
+| `tb_fill_check` (doldurma) | 256 baytlık buffer'da 49 mesaj: ack(8) + 2 tur = **tam 256 B (buffer sonunda tam bitiş)**; tur 1-6 FPGA yazmayı sonda iki TLP'ye böler, tur 7-12 32 baytlık TLP buffer sonunu aşar (VIP basa sarar); mesajlar 32 baytlık TLP'lere bölünür; 3'lü gruplar için 3 kesme (24 sahte); son olarak 12 × 24 bayt kesmesiz yazım → `BUFFER TASTI` tam 1 kez. Çıktı dosyası 49 satır, beklenenle birebir; hata sayacı 0 |
+
 Kod kasıtlı bozularak (mutasyon: ayrıştırmada yanlış ilerleme, `base+size` normalleştirmesi kaldırma,
 `first_be` maskesini kapatma) testlerin hatayı **yakaladığı** doğrulanmıştır.
 
@@ -277,6 +289,8 @@ Kod kasıtlı bozularak (mutasyon: ayrıştırmada yanlış ilerleme, `base+size
 - Verilator `if (f(...))` içindeki çıkış argümanlı fonksiyon çağrısını iki kez yürütebilir; bu yüzden
   `sim_model_cpu` içinde çağrı ayrı bir ifadeye alındı (`rx_done = asm.push_beat(...); if (rx_done) ...`).
 - `cross` SystemVerilog'da ayrılmış sözcüktür (değişken adı olarak kullanılamaz).
+- Verilator, `automatic` görevlerdeki yerel kuyrukları çağrılar arasında temizlemeyebilir. Testbench görevlerinde bu
+  yüzden her kuyruk çağrının başında `.delete()` ile açıkça temizlenir.
 
 ### Doğrulanmayanlar
 Vivado/xsim derlemesi, VHDL karma dil entegrasyonu, `tb_system_top` ve `tb_top` (`design_1_wrapper` gerektirir).

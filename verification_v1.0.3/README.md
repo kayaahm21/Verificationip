@@ -68,14 +68,33 @@ VIP bu mesajı sürerken içeriğini dinleyip işlemci tarafındaki buffer'ı da
 ```bash
 ./test/run_verilator.sh      # Verilator >= 5.0 gerekir
 ```
-İki kendi kendini kontrol eden test koşar (**şu an hepsi geçiyor**):
+Üç kendi kendini kontrol eden test koşar (**şu an hepsi geçiyor**):
 
 | Test | Neyi doğrular |
 |---|---|
 | `tb/tb_cpu_check.sv` | FPGA→CPU: 11 mesaj; tek kesme/tek mesaj, **birleşmiş kesme (2 mesaj/1 kesme)**, buffer sonuna denk gelen bölünmüş yazma, buffer sonunu aşan tek TLP, sahte kesme, pointer gelmeden kesme, `len=0`, 8 baytlık pointer, pointer = base+size |
 | `tb/tb_cq_check.sv` | CPU→FPGA: TLP baytları (descriptor/ID/len/payload), çok beat'li TLP, `tkeep`/`tuser`, `tready` ile bekletme, `77777777`/`99999999`/`88888888` zamanlaması |
+| `tb/tb_fill_check.sv` | **Buffer doldurma/sarma**: 256 baytlık buffer, 49 mesaj, 12 tur; FPGA'nın 32 baytlık TLP'lere bölmesi; buffer sonunda **tam bitiş**; sonda bölünmüş yazma ve buffer sonunu aşan tek TLP; birleşmiş/sahte kesmeler; okunmamış verinin üstüne yazma (**buffer taşması**) tespiti |
 
 Testlerin gerçekten hata yakaladığı, kodu kasıtlı bozarak (mutasyon) doğrulandı.
+
+## Buffer doldurma testi için senaryolar
+
+| Dosya | İçerik |
+|---|---|
+| `examples/buffer_fill_small.txt` | **256 baytlık** buffer, 8 tur: buffer çabuk dolar ve sarar (ack 8 B + 2 tur × 124 B = tam 256 B) |
+| `examples/buffer_fill_4k.txt` | **4096 baytlık** buffer, 36 tur (~4.5 KB cevap), 1 kez dolup sarar |
+
+Bir tur: `1DEA0005`, bekle, `77777777`+`99999999` (HB), `1DEA0007`, `1DEA000B`, `1DEA0F09`, bekle.
+Her tur FPGA'dan yaklaşık **124 bayt** cevap beklenir (24 + 72 + 16 + 12; boyutlar daha önce alınan bir
+`rq_trace.txt`'ten çıkarıldı). Kendi parametrelerinle üretmek için:
+
+```bash
+python3 tools/gen_buffer_fill.py --size 512 --rounds 20 --gap-ns 50000 --out benim_testim.txt
+```
+Dosyayı simülasyon dizinine `input_data.txt` olarak koy. Mesajlar arası bekleme (`--gap-ns`) tasarımın kesme
+gecikmesinden (~17 µs) uzun olmalı; model FPGA'ya "okuma pointer'ı" bildirmediği için çok hızlı gönderirsen FPGA
+okunmamış verinin üstüne yazar ve model `BUFFER TASTI` uyarısı verir.
 
 ## Test durumu (dürüst not)
 
