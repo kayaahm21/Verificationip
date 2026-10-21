@@ -37,6 +37,12 @@ verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -DVIP_BEHAVIORAL=1 -
     -Mdir obj_$TOP aurora_64b66b_vip.v $TOP.sv
 ./obj_$TOP/V$TOP | tee $TOP.log
 grep -q "TUM TESTLER GECTI" $TOP.log
+# Alternatif SystemVerilog surumu (alt/aurora_64b66b_vip.sv) ayni testten gecmeli
+cp "$ROOT"/alt/aurora_64b66b_vip.sv "$WORK"/aurora_64b66b_vip_alt.sv
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -DVIP_BEHAVIORAL=1 --top-module $TOP \
+    -Mdir obj_${TOP}_sv aurora_64b66b_vip_alt.sv $TOP.sv
+./obj_${TOP}_sv/V$TOP | tee ${TOP}_sv.log
+grep -q "TUM TESTLER GECTI" ${TOP}_sv.log
 # Sade govde (VIP_BEHAVIORAL tanimsiz) sadece lint'ten gecmeli
 verilator --lint-only -Wno-fatal -Wno-style --top-module aurora_64b66b_vip aurora_64b66b_vip.v
 echo "================ HEPSI GECTI ================"

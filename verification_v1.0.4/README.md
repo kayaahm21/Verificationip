@@ -98,6 +98,11 @@ Dosya: `src/aurora_64b66b_vip.v` (düz Verilog-2001, tek dosya, SV gerekmez).
    Aurora'ya özgü arayüz tanımı elde olmadığından **düz port** bırakıldı; BD'de tek tek bağlanır.
    (Orijinal IP'nin stub dosyası bulunursa gruplama ona göre güncellenebilir.)
 
+**SystemVerilog alternatifi:** `alt/aurora_64b66b_vip.sv` aynı modül adı, port ve davranışa sahiptir
+(`string/int` parametre, `logic`, `always_ff`, `$sformatf`). **İkisinden yalnızca birini** projeye ekleyin
+(modül adı çakışır). Önce `.sv` denenebilir; BD module reference olarak kabul etmezse `src/aurora_64b66b_vip.v` kullanılır.
+Cevap verme aşamasında sınıf/kuyruk gerekeceği için gelecekteki taban `.sv` sürümüdür. Aynı test ikisini de doğrular.
+
 ### Davranış (gözlemci)
 
 | Konu | Davranış |
