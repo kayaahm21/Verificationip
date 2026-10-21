@@ -1,0 +1,9 @@
+# =====================================================================
+# v1.0.4 ornek senaryosu: 4 buffer'i programlar (1DEA0001, 96 veri bayti, LITTLE-ENDIAN).
+#   her buffer icin 24 bayt: base(8B) size(8B) ptr_adresi(8B)
+#   [0..23] SIFPGA  [24..47] SHOB1  [48..71] SHOB2  [72..95] IUB
+#   size = 0 yazilirsa o buffer kapali sayilir (hata degildir).
+#   Burada: SIFPGA 0x1000/64/0x2000, SHOB1 0x3000/64/0x4000, SHOB2 0x5000/64/0x6000, IUB 0x7000/64/0x8000
+# BAR secimi (istege bagli): ADRES BAR<n> MSGID LEN DATA...   (yoksa BAR0)
+# =====================================================================
+00000000 1DEA0001 96 00 10 00 00 00 00 00 00 40 00 00 00 00 00 00 00 00 20 00 00 00 00 00 00 00 30 00 00 00 00 00 00 40 00 00 00 00 00 00 00 00 40 00 00 00 00 00 00 00 50 00 00 00 00 00 00 40 00 00 00 00 00 00 00 00 60 00 00 00 00 00 00 00 70 00 00 00 00 00 00 40 00 00 00 00 00 00 00 00 80 00 00 00 00 00 00
