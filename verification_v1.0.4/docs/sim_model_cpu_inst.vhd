@@ -16,7 +16,7 @@ begin
     --     INPUT_FILE      => "input_data.txt",   -- senaryo dosyasi
     --     BEAM_SOURCE     => "SCRIPT",           -- "SCRIPT": HB'yi VIP uretir, "DESIGN": gercek modul uretir
     --     BEAM_PULSE_CLKS => 1,                  -- uretilen HB darbesinin genisligi (clock)
-    --     OUT_FILE        => "cpu_out.txt",      -- v1.0.3: islemcinin ayristirdigi mesajlar
+    --     OUT_PREFIX      => "cpu_out",          -- v1.0.4: cpu_out_sifpga.txt, _shob1, _shob2, _iub dosyalari
     --     TRACE_FILE      => "rq_trace.txt",     -- v1.0.3: gelen tum TLP'lerin izi
     --     ISR_LATENCY_NS  => 100                 -- v1.0.3: MSI'dan sonra ISR gecikmesi
     -- )

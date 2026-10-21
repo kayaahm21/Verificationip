@@ -1,4 +1,4 @@
-# Mimari - PCIe VIP v1.0.3
+# Mimari - PCIe VIP v1.0.4 (v1.0.3 anlatımı + sonundaki "v1.0.4 eklemeleri")
 
 Bu doküman VIP'in **ne yaptığını, nasıl çalıştığını ve kodun nasıl organize olduğunu** anlatır.
 Hızlı kullanım için [README.md](README.md)'ye bakın.
@@ -48,7 +48,7 @@ huzme başı (HB) yönetimini yapar.
    FPGA ──▶ cfg_interrupt_msi_int ──▶ msi_sent ──▶ ISR ──▶ cpu_model.run_isr
                                                               │ buffer'dan mesajları ayrıştır
                                                               ▼
-                                                          cpu_out.txt   (+ rq_trace.txt)
+                                                          cpu_out_<buffer>.txt   (+ rq_trace.txt)
 ```
 
 ---
@@ -194,7 +194,7 @@ Tetikleme (`sim_model_cpu` içinde):
 3. `avail = (yeni_ptr - last_ptr) mod size`.
 4. `avail` bitene kadar **mesaj mesaj** ayrıştırılır: 4 bayt ID + 4 bayt `len` + `len` bayt veri
    (`len` = yalnız veri). Okumalar buffer sonunu aşınca başa sarar (`ring_addr`).
-5. Her mesaj `cpu_out.txt`'ye `MSGID LEN BYTE0 BYTE1 ...` olarak yazılır.
+5. Her mesaj `cpu_out_<buffer>.txt`'ye `MSGID LEN BYTE0 BYTE1 ...` olarak yazılır.
 6. `last_ptr` = bitiş konumu.
 
 **Neden birleşmiş kesme sorun değil:** ISR "kaç kesme geldi" diye saymaz; `last_ptr` ile güncel pointer arasındaki
@@ -211,7 +211,7 @@ yalnızca yazılımın yeterince hızlı okumasıyla önlenir; model bu durumu g
 farkı belirsiz olduğundan ISR hatalı mesaj ayrıştırabilir; uyarı bu yüzden önemlidir.
 
 ### 5.8 Çıktı dosyaları
-- **`cpu_out.txt`** - her satır bir mesaj, girdi dosyasıyla aynı mantıkta:
+- **`cpu_out_<buffer>.txt`** - her satır bir mesaj, girdi dosyasıyla aynı mantıkta:
   `1DEA0005 0` veya `000000A1 12 A1 A2 A3 ...` (ID 8 haneli hex, LEN onluk, bayt hex).
 - **`rq_trace.txt`** - zaman damgalı iz: programlama (`CFG`), her gelen TLP (tip, adres, DWORD sayısı, byte enable),
   pointer güncellemeleri, buffer sonu aşımı, her ISR'nin sonucu.
@@ -239,7 +239,7 @@ farkı belirsiz olduğundan ISR hatalı mesaj ayrıştırabilir; uyarı bu yüzd
 Port adları **küçük harflidir** (VHDL çağrısında harf duyarlılığı sorunu çıkmasın diye).
 
 ### 6.2 Parametreler
-`INPUT_FILE`, `BEAM_SOURCE`, `BEAM_PULSE_CLKS`, `BEAM_ACTIVE_HIGH`, `OUT_FILE`, `TRACE_FILE`, `ISR_LATENCY_NS`,
+`INPUT_FILE`, `BEAM_SOURCE`, `BEAM_PULSE_CLKS`, `BEAM_ACTIVE_HIGH`, `OUT_PREFIX`, `TRACE_FILE`, `ISR_LATENCY_NS`,
 `CFG_MSG_ID`, `CFG_BIG_ENDIAN`, `PTR_BIG_ENDIAN`, `MSG_BIG_ENDIAN`, `CQ_KEEP_WIDTH`, `RQ_KEEP_WIDTH`
 (varsayılanlar README.md'de). `+TLP_FILE=`, `+BEAM_SOURCE=`, `+CPU_OUT=`, `+RQ_TRACE=` komut satırı argümanları
 parametrelerin yerine geçer.
@@ -328,4 +328,67 @@ Sınırlar:
 - `99999999` için zaman aşımı yok; HB gelmezse senaryo orada bekler.
 - Üç özel adres değeri (`99999999`, `88888888`, `77777777`) gerçek TLP adresi olarak kullanılamaz.
 - PG213 ile doğrulanması gerekenler: RQ/CQ `tuser` bit konumları, `byte_en` ve parity düzeni.
-- Dosyaya yazma anlık (`$fflush`): hem `cpu_out.txt` hem `rq_trace.txt` her yazımdan sonra diske boşaltılır; simülasyon açıkken (`run 2 us` gibi) de okunabilir.
+- Dosyaya yazma anlık (`$fflush`): hem `cpu_out_<buffer>.txt` hem `rq_trace.txt` her yazımdan sonra diske boşaltılır; simülasyon açıkken (`run 2 us` gibi) de okunabilir.
+
+
+---
+
+# v1.0.4 eklemeleri
+
+Bu bölüm, yukarıdaki v1.0.3 anlatımına eklenen/değişen kısımları özetler. Çelişki varsa **bu bölüm geçerlidir**.
+
+## A. Değişen/eklenen dosyalar
+
+| Dosya | Değişiklik |
+|---|---|
+| `src/scn_pkg.sv` | `tlp_item.bar_id`; `parse_tlp` isteğe bağlı `BAR<n>` alanını okur ve descriptor DW3[18:16]'ya (`desc[14][2:0]`) yazar |
+| `src/cpu_pkg.sv` | `cpu_buffer` kendi durumunu taşır (last_ptr, ptr_width, unread, overrun, çıktı dosyası); `cpu_model` 4 buffer tutar; `run_isr(vec)` |
+| `src/sim_model_cpu.sv` | MSI bitleri tek tek yakalanır; `OUT_PREFIX`, `ISR_ALL_BUFFERS` |
+| `src/aurora_64b66b_vip.v` | **Yeni**: Aurora gözlemci VIP |
+| `tb/tb_multi_check.sv`, `tb/tb_aurora_check.sv` | **Yeni** testler |
+
+## B. BAR ID
+
+Satır: `ADRES [BAR<n>] MSGID LEN DATA...`. İkinci alan `BAR` ile başlıyorsa BAR numarasıdır (`BARn` geçerli bir hex
+sayı olamayacağı için MSGID ile karışmaz); yoksa BAR0. Descriptor DW3: `[7:0]` tag, `[15:8]` target function,
+`[18:16]` **BAR ID**, `[24:19]` BAR aperture (kullanılmıyor, 0). VIP BAR'a göre davranışı değiştirmez; yalnızca
+tasarımın doğru BAR'dan seçim yapıp yapmadığını sınamak için descriptor'a yazar.
+
+## C. 4 buffer'lı işlemci modeli
+
+```
+ RQ TLP --> rq_assembler --> cpu_model.on_pkt(): adres hangi buffer penceresindeyse oraya yazar
+                                (pointer adresine denk gelirse o buffer'ın pointer'ı güncellenir)
+ MSI int --> bit kenarları yakalanır --(msi_sent, 3 clk)--> irq_vec --> ISR --> cpu_model.run_isr(vec)
+                                bit0 SIFPGA, bit1 SHOB1, bit2 SHOB2, bit3 IÜB: her set bit için
+                                  pointer oku -> last_ptr ile arasını mesajlara böl -> cpu_out_<buffer>.txt
+                                bit4/5 RSI: yok sayılır (rsi_ignored++)
+```
+
+- Her buffer bağımsız: kendi `last_ptr`, pointer genişliği (4/8 bayt, yazımdan öğrenilir), okunmamış bayt sayacı ve taşma tespiti.
+- Bir TLP, başladığı buffer'ın sonunu aşarsa taşan kısım o buffer'ın başına sarılır (uyarı ile).
+- Hiçbir buffer/pointer bölgesine düşmeyen yazı hafızaya yazılır ve `stray_writes` artar (uyarı).
+- Buffer'lar üst üste biniyorsa programlama sırasında uyarı verilir.
+- ISR'ler sırasında gelen yeni bitler bir sonraki ISR'ye kalır; birleşmiş kesmelerde veri kaybolmaz çünkü ISR
+  pointer'a kadar olan her şeyi okur.
+
+## D. Aurora gözlemci VIP
+
+```
+  sifpga (FPGA tasarımı)                          aurora_64b66b_vip
+  ----------------------                          -----------------
+  s_axi_tx_*   ---------------------------------> tready=1, alt 128 bit log          (USER_TX)
+  ufc_tx_req/ms, s_axi_ufc_tx_* -----------------> istek kenarı -> tready -> ham log  (UFC_REQ, UFC_TX)
+  m_axi_rx_*, m_axi_ufc_rx_*  <------------------- boş (tvalid=0)
+  user_clk_out/sync/tx_out_clk <------------------ 125 MHz
+  channel_up/lane_up/resetler  <------------------ link modeli (cnt tabanlı)
+```
+
+- **Neden düz Verilog + `ifdef`?** BD "module reference" olarak eklenecek modülün Vivado tarafından ayrıştırılabilmesi
+  gerekir. Port listesi ve `X_INTERFACE_INFO` öznitelikleri ortak; davranış `` `ifdef VIP_BEHAVIORAL `` içinde, aksi halde sade gövde.
+- **Arayüz gruplama:** standart AXI-S dört arayüz `X_INTERFACE_INFO` ile; saat `ASSOCIATED_BUSIF` + `FREQ_HZ=125000000`.
+  Aurora'ya özgü arayüzler (core_control/core_status/gt_serial/diff clock) için VLNV bilinmediğinden düz port.
+- **Mesaj akışı:** Aurora mesajları (hüzme parametresi vb.) PCIe `input.txt` ile gelir; FPGA onları UFC'den yollar.
+  Gözlemci bunları yalnızca log'lar. Hüzme parametresi/verisi şimdilik işlenmez; sonraki sürümde cevap üretimi
+  (UFC RX) bu modüle eklenecek.
+- **Genişletme noktaları:** `beats_left` hesabı (UFC beat bölme), `s_axi_ufc_tx_tready` modeli, RX tarafı.

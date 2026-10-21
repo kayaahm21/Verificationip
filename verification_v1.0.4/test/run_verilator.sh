@@ -4,6 +4,8 @@
 #   1) tb_cpu_check : FPGA->CPU yonu (RQ, hafiza, kesme, ISR, cikti dosyasi)
 #   2) tb_cq_check  : CPU->FPGA yonu (CQ beat'leri, tkeep/tuser, HB ve bekleme zamanlamasi)
 #   3) tb_fill_check: circular buffer doldurma / sarma / tasma testi
+#   4) tb_multi_check: 4 buffer + MSI vektoru yonlendirme
+#   5) tb_aurora_check: Aurora gozlemci VIP (link, UFC TX, log)
 #   ./test/run_verilator.sh
 # Gereken: verilator >= 5.0, python3
 # Not: Verilator parametreli virtual interface'i desteklemedigi icin kaynaklar gecici bir
@@ -15,7 +17,7 @@ ROOT="$HERE/.."
 WORK="${1:-$HERE/work}"
 
 rm -rf "$WORK"; mkdir -p "$WORK"
-cp "$ROOT"/src/*.sv "$ROOT"/tb/tb_cpu_check.sv "$ROOT"/tb/tb_multi_check.sv "$ROOT"/tb/tb_cq_check.sv "$ROOT"/tb/tb_fill_check.sv "$WORK"/
+cp "$ROOT"/src/*.sv "$ROOT"/src/*.v "$ROOT"/tb/tb_cpu_check.sv "$ROOT"/tb/tb_multi_check.sv "$ROOT"/tb/tb_cq_check.sv "$ROOT"/tb/tb_fill_check.sv "$ROOT"/tb/tb_aurora_check.sv "$WORK"/
 cp "$ROOT"/examples/scenario_v103.txt "$ROOT"/examples/scenario_v104.txt "$ROOT"/examples/scenario_cq_test.txt "$ROOT"/examples/scenario_fill_cfg.txt "$WORK"/
 python3 -I "$HERE/flatten_for_verilator.py" "$WORK"
 
@@ -28,4 +30,13 @@ for TOP in tb_cpu_check tb_multi_check tb_cq_check tb_fill_check; do
     ./obj_$TOP/V$TOP +verilator+error+limit+100000 | tee $TOP.log
     grep -q "TUM TESTLER GECTI" $TOP.log
 done
+# Aurora gozlemci VIP (duz Verilog; davranis icin VIP_BEHAVIORAL tanimli)
+TOP=tb_aurora_check
+echo "================ $TOP ================"
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -DVIP_BEHAVIORAL=1 --top-module $TOP \
+    -Mdir obj_$TOP aurora_64b66b_vip.v $TOP.sv
+./obj_$TOP/V$TOP | tee $TOP.log
+grep -q "TUM TESTLER GECTI" $TOP.log
+# Sade govde (VIP_BEHAVIORAL tanimsiz) sadece lint'ten gecmeli
+verilator --lint-only -Wno-fatal -Wno-style --top-module aurora_64b66b_vip aurora_64b66b_vip.v
 echo "================ HEPSI GECTI ================"
