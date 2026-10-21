@@ -52,7 +52,10 @@ module aurora_64b66b_vip #(
     output var logic [0:2]   txn,
 
     // ---- GT referans saati ----
-    (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 gt_refclk1_p CLK" *) input var logic gt_refclk1_p,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:diff_clock:1.0 GT_DIFF_REFCLK1 CLK_P",
+       X_INTERFACE_PARAMETER = "FREQ_HZ 250000000" *)
+    input  var logic         gt_refclk1_p,
+    (* X_INTERFACE_INFO = "xilinx.com:interface:diff_clock:1.0 GT_DIFF_REFCLK1 CLK_N" *)
     input  var logic         gt_refclk1_n,
     output var logic         gt_refclk1_out,
 

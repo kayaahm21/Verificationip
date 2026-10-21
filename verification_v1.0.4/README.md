@@ -93,8 +93,8 @@ Dosya: `src/aurora_64b66b_vip.v` (düz Verilog-2001, tek dosya, SV gerekmez).
    `aurora_64b66b_vip`'i ekle ve aynı adları ver. Her hücrede `UNIT_NAME` parametresini ayarla
    (`"shob_1"`, `"shob_2"`) → `aurora_obs_shob_1.txt` / `aurora_obs_shob_2.txt` üretilir.
 3. Portlar orijinal `Aurora_aurora_64b66b_0_0` ile birebir aynıdır. `USER_DATA_S_AXIS_TX`, `USER_DATA_M_AXIS_RX`,
-   `UFC_S_AXIS_TX`, `UFC_M_AXIS_RX` standart AXI-Stream olarak gruplanır; `user_clk_out` saati bu arayüzlerle
-   ilişkilendirilir (`FREQ_HZ=125000000`). `GT_DIFF_REFCLK1`, `CORE_CONTROL`, `CORE_STATUS`, `GT_SERIAL_*` için
+   `UFC_S_AXIS_TX`, `UFC_M_AXIS_RX` standart AXI-Stream olarak, `gt_refclk1_p/n` ise `GT_DIFF_REFCLK1` (diff_clock, 250 MHz) olarak gruplanır; `user_clk_out` saati bu arayüzlerle
+   ilişkilendirilir (`FREQ_HZ=125000000`). `CORE_CONTROL`, `CORE_STATUS`, `GT_SERIAL_*` için
    Aurora'ya özgü arayüz tanımı elde olmadığından **düz port** bırakıldı; BD'de tek tek bağlanır.
    (Orijinal IP'nin stub dosyası bulunursa gruplama ona göre güncellenebilir.)
 
