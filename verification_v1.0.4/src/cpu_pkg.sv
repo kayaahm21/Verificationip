@@ -287,6 +287,7 @@ package cpu_pkg;
         int unsigned ptr_updates;
         int unsigned error_count;
         int unsigned overrun_count;
+        int unsigned unknown_msi;   // bit 6..31 ile gelen (tanimsiz) kesmeler
         int unsigned rsi_ignored;    // RSI bitleri (4,5) ile gelen ve yok sayilan kesmeler
         int unsigned stray_writes;   // hicbir buffer'a / pointer bolgesine denk dusmeyen yazimlar
 
@@ -303,7 +304,7 @@ package cpu_pkg;
                 buffers[i] = new(buf_name(i), {out_prefix, "_", buf_name(i), ".txt"});
             this.tlp_count = 0; this.msg_count = 0; this.isr_count = 0;
             this.spurious_isr = 0; this.wrap_events = 0; this.ptr_updates = 0; this.error_count = 0;
-            this.overrun_count = 0; this.rsi_ignored = 0; this.stray_writes = 0;
+            this.overrun_count = 0; this.rsi_ignored = 0; this.unknown_msi = 0; this.stray_writes = 0;
             trace_fd = $fopen(trace_file, "w");
             if (trace_fd == 0) $fatal(1, "[CPU] iz dosyasi acilamadi: %s", trace_file);
         endfunction
@@ -482,7 +483,12 @@ package cpu_pkg;
         // ------------------------------------------------------------
         function void run_isr(bit [31:0] vec);
             isr_count++;
-            trace($sformatf("ISR #%0d vektor=%b", isr_count, vec[5:0]));
+            trace($sformatf("ISR #%0d vektor=%h (bit5..0=%b)", isr_count, vec, vec[5:0]));
+            if (vec[31:6] != 0) begin
+                unknown_msi++;
+                $warning("[CPU] MSI vektorunde tanimsiz bit(ler) var: %h (bit 6..31 kullanilmiyor).", vec);
+                trace($sformatf("  !! tanimsiz MSI bitleri: %h", vec & 32'hFFFF_FFC0));
+            end
             for (int i = 0; i < NBUF; i++)
                 if (vec[i]) run_isr_buf(i);
             if (vec[MSI_RSI_A] || vec[MSI_RSI_B]) begin

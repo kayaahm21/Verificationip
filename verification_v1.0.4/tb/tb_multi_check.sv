@@ -243,6 +243,10 @@ module tb_multi_check;
         fpga_msg(2, 32'hC5, 4);
         fpga_irq(32'h04);
 
+        $display("[TB] M5: tanimsiz MSI biti (bit 8) - uyari verilmeli, hicbir buffer okunmamali");
+        fpga_irq(32'h100);
+        check_int("M5 tanimsiz bit sayisi", dut.cpu.unknown_msi, 1);
+
         #1000;
         $display("---------------- SONUC ----------------");
         for (int i = 0; i < 4; i++) compare_output(i);
