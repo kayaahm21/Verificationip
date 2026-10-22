@@ -151,7 +151,8 @@ module aurora_64b66b_vip #(
     initial begin
         if (LOG_ENABLE) begin
             fd = $fopen($sformatf("aurora_obs_%s.txt", UNIT_NAME), "w");
-            if (fd == 0) $display("[AURORA %s] log dosyasi acilamadi", UNIT_NAME);
+            $display("[AURORA %s] DAVRANIS SURUMU aktif (v1.0.4). Log dosyasi: aurora_obs_%s.txt", UNIT_NAME, UNIT_NAME);
+            if (fd == 0) $display("[AURORA %s] HATA: log dosyasi acilamadi", UNIT_NAME);
             else begin
                 $fdisplay(fd, "# aurora_64b66b_vip gozlemci logu (birim=%s). Zamanlar ns.", UNIT_NAME);
                 $fflush(fd);
@@ -200,7 +201,8 @@ module aurora_64b66b_vip #(
     end
 
 `else
-    // ---- SADE GOVDE (VIP_BEHAVIORAL tanimsiz): tum cikislar sabit ----
+    // ---- SADE GOVDE (VIP_STUB): tum cikislar sabit ----
+    initial $display("[AURORA] UYARI: SADE GOVDE (VIP_STUB) aktif - saat/link/log YOK.");
     assign s_axi_tx_tready = 1'b1;
     assign m_axi_rx_tdata = '0;  assign m_axi_rx_tkeep = '0;
     assign m_axi_rx_tlast = 1'b0; assign m_axi_rx_tvalid = 1'b0;
