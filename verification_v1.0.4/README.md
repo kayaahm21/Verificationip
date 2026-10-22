@@ -35,7 +35,7 @@ Yeni: **Aurora gözlemci VIP** (`src/aurora_64b66b_vip.v`).
 BAR numarası senaryoda satır satır **sen** verirsin; VIP BAR'a göre bir şey yapmaz, yalnızca descriptor'a yazar.
 `ISR_ALL_BUFFERS=1` verilirse vektör ne olursa olsun 4 buffer da okunur (eski v1.0.3 davranışına yakın; hata ayıklama için).
 
-## `1DEA0001` konfigürasyon mesajı (96 veri baytı, little-endian)
+## `1DEA0001` konfigürasyon mesajı (LEN=124; ilk 96 veri baytı kullanılır, little-endian)
 
 | Veri baytları | Buffer |
 |---|---|
@@ -44,7 +44,7 @@ BAR numarası senaryoda satır satır **sen** verirsin; VIP BAR'a göre bir şey
 | `[48..71]` | SHOB2 |
 | `[72..95]` | IÜB |
 
-Fazla baytlar yok sayılır. Mesaj 24 baytın katları kadar kısaysa kalan buffer'lar kapalı kalır
+`[96..123]` baytları (toplam LEN=124) şimdilik yok sayılır; satırdaki bayt sayısı yine `LEN` ile tutmalıdır. Mesaj 24 baytın katları kadar kısaysa kalan buffer'lar kapalı kalır
 (en az 24 bayt = yalnızca SIFPGA; eski v1.0.3 örneği bu yüzden çalışır). Örnek: `examples/scenario_v104.txt`.
 
 ## Hızlı başlangıç - PCIe

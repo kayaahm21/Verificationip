@@ -40,7 +40,7 @@ def main():
     # 1DEA0001 verisi (v1.0.4): 4 x (base, size, ptr_addr), little-endian; SIFPGA, SHOB1, SHOB2, IUB.
     # Yalnizca SIFPGA acik; digerleri size=0 (kapali).
     off = " ".join(["00"] * 24)
-    cfg = f"00000000 1DEA0001 96 {le(a.base, 8)} {le(a.size, 8)} {le(a.ptr, 8)} {off} {off} {off}"
+    cfg = f"00000000 1DEA0001 124 {le(a.base, 8)} {le(a.size, 8)} {le(a.ptr, 8)} {off} {off} {off} {" ".join(["00"] * 28)}"
 
     lines = [
         "# =====================================================================",
