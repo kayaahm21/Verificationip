@@ -94,9 +94,11 @@ Dosya: `src/aurora_64b66b_vip.v` (düz Verilog-2001, tek dosya, SV gerekmez).
    (`"shob_1"`, `"shob_2"`) → `aurora_obs_shob_1.txt` / `aurora_obs_shob_2.txt` üretilir.
 3. Portlar orijinal `Aurora_aurora_64b66b_0_0` ile birebir aynıdır. `USER_DATA_S_AXIS_TX`, `USER_DATA_M_AXIS_RX`,
    `UFC_S_AXIS_TX`, `UFC_M_AXIS_RX` standart AXI-Stream olarak, `gt_refclk1_p/n` ise `GT_DIFF_REFCLK1` (diff_clock, 250 MHz) olarak gruplanır; `user_clk_out` saati bu arayüzlerle
-   ilişkilendirilir (`FREQ_HZ=125000000`). `CORE_CONTROL`, `CORE_STATUS`, `GT_SERIAL_*` için
-   Aurora'ya özgü arayüz tanımı elde olmadığından **düz port** bırakıldı; BD'de tek tek bağlanır.
-   (Orijinal IP'nin stub dosyası bulunursa gruplama ona göre güncellenebilir.)
+   ilişkilendirilir (`FREQ_HZ=125000000`). `CORE_CONTROL` (pma_init, power_down, loopback), `CORE_STATUS` (channel_up, lane_up, hard_err, soft_err),
+   `GT_SERIAL_RX` (rxp, rxn) ve `GT_SERIAL_TX` (txp, txn) gerçek IP'den alınan VLNV'lerle paketlenmiştir
+   (`display_aurora:core_control_in`, `core_status_out`, `GT_Serial_Transceiver_Pins_RX/TX`). Arayüz içindeki
+   sinyal (mantıksal) adları ve hangi portların hangi arayüze girdiği **tahmindir**; BD'de gerçek IP ile
+   karşılaştırın. Gruplanmayan portlar (reset_pb, crc_*, gt_powergood vb.) düz pin kalır.
 
 **SystemVerilog alternatifi:** `alt/aurora_64b66b_vip.sv` aynı modül adı, port ve davranışa sahiptir
 (`string/int` parametre, `logic`, `always_ff`, `$sformatf`). **İkisinden yalnızca birini** projeye ekleyin

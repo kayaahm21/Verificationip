@@ -58,9 +58,13 @@ module aurora_64b66b_vip #(
     output wire         ufc_in_progress,
 
     // ---- GT seri I/O ----
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_RX:1.0 GT_SERIAL_RX RXP" *)
     input  wire [0:2]   rxp,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_RX:1.0 GT_SERIAL_RX RXN" *)
     input  wire [0:2]   rxn,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_TX:1.0 GT_SERIAL_TX TXP" *)
     output wire [0:2]   txp,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_TX:1.0 GT_SERIAL_TX TXN" *)
     output wire [0:2]   txn,
 
     // ---- GT referans saati ----
@@ -72,9 +76,13 @@ module aurora_64b66b_vip #(
     output wire         gt_refclk1_out,
 
     // ---- Hata / durum ----
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS HARD_ERR" *)
     output wire         hard_err,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS SOFT_ERR" *)
     output wire         soft_err,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS CHANNEL_UP" *)
     output wire         channel_up,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS LANE_UP" *)
     output wire [0:2]   lane_up,
     output wire         crc_pass_fail_n,
     output wire         crc_valid,
@@ -87,8 +95,11 @@ module aurora_64b66b_vip #(
     output wire         sync_clk_out,
     input  wire         reset_pb,
     input  wire         gt_rxcdrovrden_in,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL POWER_DOWN" *)
     input  wire         power_down,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL LOOPBACK" *)
     input  wire [2:0]   loopback,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL PMA_INIT" *)
     input  wire         pma_init,
     output wire         gt_pll_lock,
 

@@ -46,9 +46,13 @@ module aurora_64b66b_vip #(
     output var logic         ufc_in_progress,
 
     // ---- GT seri I/O ----
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_RX:1.0 GT_SERIAL_RX RXP" *)
     input  var logic [0:2]   rxp,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_RX:1.0 GT_SERIAL_RX RXN" *)
     input  var logic [0:2]   rxn,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_TX:1.0 GT_SERIAL_TX TXP" *)
     output var logic [0:2]   txp,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:GT_Serial_Transceiver_Pins_TX:1.0 GT_SERIAL_TX TXN" *)
     output var logic [0:2]   txn,
 
     // ---- GT referans saati ----
@@ -60,9 +64,13 @@ module aurora_64b66b_vip #(
     output var logic         gt_refclk1_out,
 
     // ---- Hata / durum ----
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS HARD_ERR" *)
     output var logic         hard_err,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS SOFT_ERR" *)
     output var logic         soft_err,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS CHANNEL_UP" *)
     output var logic         channel_up,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS LANE_UP" *)
     output var logic [0:2]   lane_up,
     output var logic         crc_pass_fail_n,
     output var logic         crc_valid,
@@ -75,8 +83,11 @@ module aurora_64b66b_vip #(
     output var logic         sync_clk_out,
     input  var logic         reset_pb,
     input  var logic         gt_rxcdrovrden_in,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL POWER_DOWN" *)
     input  var logic         power_down,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL LOOPBACK" *)
     input  var logic [2:0]   loopback,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL PMA_INIT" *)
     input  var logic         pma_init,
     output var logic         gt_pll_lock,
 
