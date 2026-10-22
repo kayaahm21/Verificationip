@@ -15,16 +15,22 @@
 //
 // Log dosyasi: aurora_obs_<UNIT_NAME>.txt   (zaman damgali, satir satir)
 //
-// Derleme: VIP_BEHAVIORAL tanimli degilse yalnizca portlar + sabit atamalar (BD'nin modulu
-// ayristirabilmesi icin govde sade). Davranis icin simulasyon fileset'inde
-//     verilog_define = VIP_BEHAVIORAL=1
-// tanimlanmalidir. (Verif projesi sentezlenmez; yine de dosya sentez ayristiricisina uygundur.)
+// Derleme: davranis varsayilan olarak acik. VIP_STUB tanimlanirsa yalnizca portlar + sabit atamalar
+// (BD'nin modulu ayristirabilmesi icin sade govde) derlenir. (Verif projesi sentezlenmez; yine de dosya sentez ayristiricisina uygundur.)
 //
 // Arayuz gruplari (X_INTERFACE_INFO): USER_DATA_S_AXIS_TX, USER_DATA_M_AXIS_RX, UFC_S_AXIS_TX,
 // UFC_M_AXIS_RX standart AXI-Stream olarak gruplanir. Aurora'ya ozgu arayuz VLNV'leri (core_control,
 // core_status, gt_serial vb.) bilinmedigi icin bu portlar DUZ port olarak birakilmistir;
 // BD'de baglantilar tek tek (ya da otomatik) yapilabilir.
 // =====================================================================
+// Davranis varsayilan olarak ACIKTIR (ekstra tanim gerekmez). Yalnizca ayristirma icin sade govde
+// istenirse VIP_STUB tanimlanir. (Eski VIP_BEHAVIORAL tanimi da kabul edilir, etkisi yoktur.)
+`ifndef VIP_STUB
+  `ifndef VIP_BEHAVIORAL
+    `define VIP_BEHAVIORAL
+  `endif
+`endif
+
 module aurora_64b66b_vip #(
     parameter UNIT_NAME      = "shob_1",   // log dosyasi adi: aurora_obs_<UNIT_NAME>.txt
     parameter LOG_ENABLE     = 1,          // 0: log yazma

@@ -30,19 +30,19 @@ for TOP in tb_cpu_check tb_multi_check tb_cq_check tb_fill_check; do
     ./obj_$TOP/V$TOP +verilator+error+limit+100000 | tee $TOP.log
     grep -q "TUM TESTLER GECTI" $TOP.log
 done
-# Aurora gozlemci VIP (duz Verilog; davranis icin VIP_BEHAVIORAL tanimli)
+# Aurora gozlemci VIP (duz Verilog; davranis varsayilan olarak acik)
 TOP=tb_aurora_check
 echo "================ $TOP ================"
-verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -DVIP_BEHAVIORAL=1 --top-module $TOP \
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module $TOP \
     -Mdir obj_$TOP aurora_64b66b_vip.v $TOP.sv
 ./obj_$TOP/V$TOP | tee $TOP.log
 grep -q "TUM TESTLER GECTI" $TOP.log
 # Alternatif SystemVerilog surumu (alt/aurora_64b66b_vip.sv) ayni testten gecmeli
 cp "$ROOT"/alt/aurora_64b66b_vip.sv "$WORK"/aurora_64b66b_vip_alt.sv
-verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -DVIP_BEHAVIORAL=1 --top-module $TOP \
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module $TOP \
     -Mdir obj_${TOP}_sv aurora_64b66b_vip_alt.sv $TOP.sv
 ./obj_${TOP}_sv/V$TOP | tee ${TOP}_sv.log
 grep -q "TUM TESTLER GECTI" ${TOP}_sv.log
-# Sade govde (VIP_BEHAVIORAL tanimsiz) sadece lint'ten gecmeli
-verilator --lint-only -Wno-fatal -Wno-style --top-module aurora_64b66b_vip aurora_64b66b_vip.v
+# Sade govde (VIP_STUB) sadece lint'ten gecmeli
+verilator --lint-only -Wno-fatal -Wno-style -DVIP_STUB --top-module aurora_64b66b_vip aurora_64b66b_vip.v
 echo "================ HEPSI GECTI ================"

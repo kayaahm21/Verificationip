@@ -87,8 +87,8 @@ Her `99999999`'dan önce onu üretecek bir `77777777` olmalı (SCRIPT modunda), 
 
 Dosya: `src/aurora_64b66b_vip.v` (düz Verilog-2001, tek dosya, SV gerekmez).
 
-1. Dosyayı projeye **simulation source** olarak ekle. Simulation set → Verilog Options → **`VIP_BEHAVIORAL=1`** tanımla.
-   (Tanımsızsa modül sade bir gövdeyle derlenir: BD'nin modülü ayrıştırması için; davranış yoktur.)
+1. Dosyayı projeye **design source** olarak ekle (BD module reference için). Davranış **varsayılan olarak açıktır**, ekstra tanım gerekmez.
+   (Yalnızca sade gövde istenirse `VIP_STUB` tanımlanır.)
 2. Block Design'da `shob_1_aurora_gth` ve `shob_2_aurora_gth` hücrelerini sil; yerine **Add Module** ile
    `aurora_64b66b_vip`'i ekle ve aynı adları ver. Her hücrede `UNIT_NAME` parametresini ayarla
    (`"shob_1"`, `"shob_2"`) → `aurora_obs_shob_1.txt` / `aurora_obs_shob_2.txt` üretilir.

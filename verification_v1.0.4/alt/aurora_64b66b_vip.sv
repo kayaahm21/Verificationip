@@ -10,9 +10,16 @@
 //
 // Fark: SystemVerilog yapilari (string/bit/int parametreler, logic, always_ff, $sformatf, function).
 // Cevap verme asamasinda sinif/kuyruk eklemek icin bu surum daha uygun bir tabandir.
-// Davranis icin simulasyon fileset'inde VIP_BEHAVIORAL=1 tanimlanmalidir.
 // Ayrintilar icin src/aurora_64b66b_vip.v basligina bakin.
 // =====================================================================
+// Davranis varsayilan olarak ACIKTIR (ekstra tanim gerekmez). Yalnizca ayristirma icin sade govde
+// istenirse VIP_STUB tanimlanir. (Eski VIP_BEHAVIORAL tanimi da kabul edilir, etkisi yoktur.)
+`ifndef VIP_STUB
+  `ifndef VIP_BEHAVIORAL
+    `define VIP_BEHAVIORAL
+  `endif
+`endif
+
 module aurora_64b66b_vip #(
     parameter string UNIT_NAME = "shob_1",   // log dosyasi adi: aurora_obs_<UNIT_NAME>.txt
     parameter bit    LOG_ENABLE = 1,          // 0: log yazma
