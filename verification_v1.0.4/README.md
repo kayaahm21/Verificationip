@@ -94,12 +94,15 @@ Dosya: `src/aurora_64b66b_vip.v` (düz Verilog-2001, tek dosya, SV gerekmez).
    (`"shob_1"`, `"shob_2"`) → `aurora_obs_shob_1.txt` / `aurora_obs_shob_2.txt` üretilir.
 3. Portlar orijinal `Aurora_aurora_64b66b_0_0` ile birebir aynıdır. `USER_DATA_S_AXIS_TX`, `USER_DATA_M_AXIS_RX`,
    `UFC_S_AXIS_TX`, `UFC_M_AXIS_RX` standart AXI-Stream olarak, `gt_refclk1_p/n` ise `GT_DIFF_REFCLK1` (diff_clock, 250 MHz) olarak gruplanır; `user_clk_out` saati bu arayüzlerle
-   ilişkilendirilir (`FREQ_HZ=125000000`). `CORE_CONTROL` (gt_rxcdrovrden_in, loopback, power_down), `CORE_STATUS` (channel_up, lane_up, hard_err, soft_err,
-   crc_pass_fail, crc_valid, gt_pll_lock, pll_not_locked_out), `GT_SERIAL_RX` (rxp, rxn) ve `GT_SERIAL_TX` (txp, txn)
-   gerçek IP'den alınan VLNV'lerle paketlenmiştir (`display_aurora:core_control_in`, `core_status_out`,
-   `GT_Serial_Transceiver_Pins_RX/TX`). Port-arayüz eşlemesi `Top.vhd`'deki `aurora_wrapper` port map'inden çıkarıldı.
-   Arayüz içindeki mantıksal sinyal adlarının **büyük/küçük harf yazımı tahmindir**; BD'de doğrulayın.
-   Gruplanmayan portlar (pma_init, reset_pb, gt_powergood, sys_reset_out vb.) düz pin kalır.
+   ilişkilendirilir (`FREQ_HZ=125000000`). `CORE_CONTROL`, `CORE_STATUS`, `GT_SERIAL_RX/TX` Aurora'ya özgü arayüzleri **paketlenmemiştir**: bu portlar düz pindir
+   (Vivado, bu özel arayüzleri bizim etiketlerle tanımadı). `Top.vhd`'nin beklediği `SHOB_1_CORE_STATUS_channel_up`
+   gibi dış port adlarını üretmek için BD'de `tools/bd_externals_aurora.tcl` betiği kullanılır:
+   ```
+   source <yol>/tools/bd_externals_aurora.tcl
+   make_aurora_externals shob_1_aurora_gth SHOB_1
+   make_aurora_externals shob_2_aurora_gth SHOB_2
+   ```
+   Betik eski, boş kalmış arayüz dış portlarını siler ve her pin için düz dış port açar.
 
 **SystemVerilog alternatifi:** `alt/aurora_64b66b_vip.sv` aynı modül adı, port ve davranışa sahiptir
 (`string/int` parametre, `logic`, `always_ff`, `$sformatf`). **İkisinden yalnızca birini** projeye ekleyin
