@@ -87,7 +87,6 @@ module aurora_64b66b_vip #(
     input  var logic         power_down,
     (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL LOOPBACK" *)
     input  var logic [2:0]   loopback,
-    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL PMA_INIT" *)
     input  var logic         pma_init,
     output var logic         gt_pll_lock,
 
@@ -111,7 +110,7 @@ module aurora_64b66b_vip #(
     // ---- Link modeli: ok=1 iken sayac ilerler; reset_pb/pma_init/power_down sifirlar ----
     int   cnt = 0;
     logic ok;
-    assign ok = ~(reset_pb | pma_init | power_down);
+    assign ok = !(reset_pb === 1'b1 || pma_init === 1'b1 || power_down === 1'b1);
     always_ff @(posedge clk) begin
         if (!ok)                 cnt <= 0;
         else if (cnt < 1000000)  cnt <= cnt + 1;

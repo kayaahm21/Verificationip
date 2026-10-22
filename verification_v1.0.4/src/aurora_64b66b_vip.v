@@ -84,23 +84,27 @@ module aurora_64b66b_vip #(
     output wire         channel_up,
     (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS LANE_UP" *)
     output wire [0:2]   lane_up,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS CRC_PASS_FAIL" *)
     output wire         crc_pass_fail_n,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS CRC_VALID" *)
     output wire         crc_valid,
 
     // ---- Sistem arayuzu ----
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 user_clk_out CLK",
        X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF USER_DATA_S_AXIS_TX:USER_DATA_M_AXIS_RX:UFC_S_AXIS_TX:UFC_M_AXIS_RX, FREQ_HZ 125000000" *)
     output wire         user_clk_out,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS PLL_NOT_LOCKED_OUT" *)
     output wire         mmcm_not_locked_out,
     output wire         sync_clk_out,
     input  wire         reset_pb,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL GT_RXCDROVRDEN_IN" *)
     input  wire         gt_rxcdrovrden_in,
     (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL POWER_DOWN" *)
     input  wire         power_down,
     (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL LOOPBACK" *)
     input  wire [2:0]   loopback,
-    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_control_in:1.0 CORE_CONTROL PMA_INIT" *)
     input  wire         pma_init,
+    (* X_INTERFACE_INFO = "xilinx.com:display_aurora:core_status_out:1.0 CORE_STATUS GT_PLL_LOCK" *)
     output wire         gt_pll_lock,
 
     input  wire         init_clk,
@@ -128,7 +132,7 @@ module aurora_64b66b_vip #(
     // ok=1 iken sayac ilerler; reset_pb / pma_init / power_down sayaci sifirlar (link yeniden kurulur).
     // Sira: gt_powergood -> gt_pll_lock -> gt_reset_out biter -> sys_reset_out biter -> channel_up/lane_up
     integer cnt = 0;
-    wire    ok  = ~(reset_pb | pma_init | power_down);
+    wire    ok  = !(reset_pb === 1'b1 || pma_init === 1'b1 || power_down === 1'b1);
     always @(posedge clk) begin
         if (!ok) cnt <= 0;
         else if (cnt < 1000000) cnt <= cnt + 1;
