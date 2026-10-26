@@ -133,7 +133,7 @@ Log örneği (`aurora_obs_<birim>.txt`, zamanlar ns):
 
 Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır, **DRP portları (`gt0_drp*`) yoktur**.
 - `rxp/rxn/txp/txn/lane_up/gt_powergood` `[0:0]` vektördür (wrapper'daki `std_logic_vector(0 to 0)` ile uyumlu).
-- `tx_out_clk` 125 MHz üretir (BD'deki BUFG_GT zinciri bunu kullanır). Dahili mantık `user_clk` girişine bağlı değildir.
+- `tx_out_clk` 125 MHz üretir (BD'deki BUFG_GT zinciri bunu kullanır). Link modeli dahili saatle çalışır; kullanıcı verisi (`s_axi_tx_*`) log'u **`user_clk`** girişiyle örneklenir (BD'de bu saat SHOB IP'sinin `user_clk_out`'undan gelir, `user_clk` ve `sync_clk` aynı düğüme bağlıdır). Bu yüzden SHOB VIP'i de aktif olmalıdır.
 - Link sayacı `reset`/`gt_reset`/`power_down`'ın **yükselen kenarında** yeniden başlar (seviyeye bağlı değil: BD `reset`'i `sys_reset_out`'tan türetiyorsa kilitlenme olmasın).
 - Log: `aurora8b10b_obs_<UNIT_NAME>.txt`.
 - BD'de dış portlar için: `make_iub_externals aurora_8b10b_vip_0` (`tools/bd_externals_aurora.tcl`).

@@ -87,7 +87,7 @@ module aurora_8b10b_vip #(
     // DAVRANIS (yalnizca simulasyon)
     // =================================================================
 
-    // ---- Dahili 125 MHz saat (user_clk girisi BD'deki saat agacindan gelir; mantik buna BAGLI DEGIL) ----
+    // ---- Dahili 125 MHz saat: link modeli ve tx_out_clk icin. Kullanici verisi log'u user_clk girisiyle orneklenir. ----
     reg clk = 1'b0;
     always #4 clk = ~clk;                     // 8 ns periyot
     assign tx_out_clk      = clk;             // BD'deki BUFG_GT zinciri bunu kullanir
@@ -146,6 +146,7 @@ module aurora_8b10b_vip #(
         end
     end
 
+    // Link durumu degisimleri (dahili saat)
     reg cu_d = 1'b0;
     always @(posedge clk) begin
         cu_d <= channel_up;
@@ -153,6 +154,11 @@ module aurora_8b10b_vip #(
             $fdisplay(fd, "%0d LINK channel_up=%0d lane_up=%b", $time, channel_up, lane_up);
             $fflush(fd);
         end
+    end
+
+    // Kullanici verisi: tasarimin s_axi_tx_* sinyalleri user_clk ile (BD'de SHOB IP'sinden gelen saat)
+    // surulur; yaris kosullarindan kacinmak icin veri user_clk girisiyle orneklenir.
+    always @(posedge user_clk) begin
         if (s_axi_tx_tvalid && s_axi_tx_tready && fd != 0) begin
             $fdisplay(fd, "%0d USER_TX data=%h keep=%h last=%0d", $time,
                       s_axi_tx_tdata, s_axi_tx_tkeep, s_axi_tx_tlast);
