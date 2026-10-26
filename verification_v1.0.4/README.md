@@ -7,6 +7,7 @@ Verilog VIP seti. **Verif projesi sentezlenmez**; yalnızca simülasyon içindir
 |---|---|---|
 | `sim_model_cpu` (SV) | PCIe UltraScale+ | İşlemci gibi davranır: senaryodaki TLP'leri sürer, FPGA'nın yazdığı TLP'leri **4 circular buffer**'a alır, MSI vektörüne göre okuyup **buffer başına ayrı dosyaya** yazar |
 | `aurora_64b66b_vip` (Verilog) | Aurora 64B/66B (3 lane, UFC) | **Gözlemci**: link/saat/reset modeli üretir, FPGA'nın UFC ve kullanıcı verisini ham olarak log'lar. Cevap üretmez |
+| `aurora_8b10b_vip` (Verilog) | Aurora 8b/10b (IÜB, 1 lane, 32 bit, UFC yok) | Aynı gözlemci mantığı; DRP portu yok |
 
 Ayrıntılı mimari: **[ARCHITECTURE.md](ARCHITECTURE.md)**
 
@@ -128,6 +129,16 @@ Log örneği (`aurora_obs_<birim>.txt`, zamanlar ns):
 5132 USER_TX lo128=00112233445566778899aabbccddeeff keep=00ffff last=1
 ```
 
+## Aurora 8b10b gözlemci VIP (IÜB)
+
+Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır, **DRP portları (`gt0_drp*`) yoktur**.
+- `rxp/rxn/txp/txn/lane_up/gt_powergood` `[0:0]` vektördür (wrapper'daki `std_logic_vector(0 to 0)` ile uyumlu).
+- `tx_out_clk` 125 MHz üretir (BD'deki BUFG_GT zinciri bunu kullanır). Dahili mantık `user_clk` girişine bağlı değildir.
+- Link sayacı `reset`/`gt_reset`/`power_down`'ın **yükselen kenarında** yeniden başlar (seviyeye bağlı değil: BD `reset`'i `sys_reset_out`'tan türetiyorsa kilitlenme olmasın).
+- Log: `aurora8b10b_obs_<UNIT_NAME>.txt`.
+- BD'de dış portlar için: `make_iub_externals aurora_8b10b_vip_0` (`tools/bd_externals_aurora.tcl`).
+- Aurora'ya özgü arayüzler (CORE_CONTROL/CORE_STATUS/GT_SERIAL) 64b66b VIP'teki gibi **paketlenmemiştir** (düz pin); AXI-Stream arayüzleri `USER_DATA_S_AXIS_TX`/`USER_DATA_M_AXIS_RX` paketlidir.
+
 ## Test
 
 ```bash
@@ -140,6 +151,7 @@ Log örneği (`aurora_obs_<birim>.txt`, zamanlar ns):
 | `tb/tb_multi_check.sv` | **4 buffer**, MSI vektörüne göre yönlendirme (yalnız set bit okunur), RSI yok sayma, SHOB2 sarma, ayrı dosyalar |
 | `tb/tb_cq_check.sv` | CPU→FPGA TLP baytları, tkeep/tuser, HB/bekleme zamanlaması, **BAR ID (`BAR2`, `bar5`, varsayılan BAR0)** |
 | `tb/tb_fill_check.sv` | Buffer doldurma / sarma / taşma tespiti |
+| `tb/tb_aurora8b_check.sv` | Aurora 8b10b VIP: 125 MHz, link sırası, RX boş, log, reset kenarı ve kilitlenme yok |
 | `tb/tb_aurora_check.sv` | Aurora VIP: 125 MHz, link sırası, UFC el sıkışması, RX boş, log içeriği, `reset_pb` ile yeniden link |
 
 ## Test durumu (dürüst not)

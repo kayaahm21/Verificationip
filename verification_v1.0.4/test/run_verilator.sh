@@ -17,7 +17,7 @@ ROOT="$HERE/.."
 WORK="${1:-$HERE/work}"
 
 rm -rf "$WORK"; mkdir -p "$WORK"
-cp "$ROOT"/src/*.sv "$ROOT"/src/*.v "$ROOT"/tb/tb_cpu_check.sv "$ROOT"/tb/tb_multi_check.sv "$ROOT"/tb/tb_cq_check.sv "$ROOT"/tb/tb_fill_check.sv "$ROOT"/tb/tb_aurora_check.sv "$WORK"/
+cp "$ROOT"/src/*.sv "$ROOT"/src/*.v "$ROOT"/tb/tb_cpu_check.sv "$ROOT"/tb/tb_multi_check.sv "$ROOT"/tb/tb_cq_check.sv "$ROOT"/tb/tb_fill_check.sv "$ROOT"/tb/tb_aurora_check.sv "$ROOT"/tb/tb_aurora8b_check.sv "$WORK"/
 cp "$ROOT"/examples/scenario_v103.txt "$ROOT"/examples/scenario_v104.txt "$ROOT"/examples/scenario_cq_test.txt "$ROOT"/examples/scenario_fill_cfg.txt "$WORK"/
 python3 -I "$HERE/flatten_for_verilator.py" "$WORK"
 
@@ -37,6 +37,15 @@ verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module $TOP \
     -Mdir obj_$TOP aurora_64b66b_vip.v $TOP.sv
 ./obj_$TOP/V$TOP | tee $TOP.log
 grep -q "TUM TESTLER GECTI" $TOP.log
+# Aurora 8b10b gozlemci VIP (IUB)
+TOP=tb_aurora8b_check
+echo "================ $TOP ================"
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module $TOP \
+    -Mdir obj_$TOP aurora_8b10b_vip.v $TOP.sv
+./obj_$TOP/V$TOP | tee $TOP.log
+grep -q "TUM TESTLER GECTI" $TOP.log
+verilator --lint-only -Wno-fatal -Wno-style -DVIP_STUB --top-module aurora_8b10b_vip aurora_8b10b_vip.v
+TOP=tb_aurora_check
 # Alternatif SystemVerilog surumu (alt/aurora_64b66b_vip.sv) ayni testten gecmeli
 cp "$ROOT"/alt/aurora_64b66b_vip.sv "$WORK"/aurora_64b66b_vip_alt.sv
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module $TOP \
