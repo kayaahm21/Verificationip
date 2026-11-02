@@ -118,7 +118,7 @@ Cevap verme aşamasında sınıf/kuyruk gerekeceği için gelecekteki taban `.sv
 | Link | Reset serbestken: `gt_powergood` (5 clk) → `gt_pll_lock` (8) → `gt_reset_out` biter (10) → `sys_reset_out` biter (20) → `channel_up`/`lane_up=111` (`LINK_UP_CLKS`=625 clk ≈ 5 µs). `reset_pb`, `pma_init`, `power_down` linki düşürür |
 | `s_axi_tx_tready` | Her zaman 1 |
 | UFC TX | `ufc_tx_req` yükselen kenarında istek alınır (`ufc_tx_ms` = bayt-1, 24 baytlık beat'lere bölünür; ms=3 → 1 beat), beat'ler bitene kadar `s_axi_ufc_tx_tready=1`. Ham 192 bit `tdata` log'lanır |
-| RX / UFC RX | Boş (`tvalid=0`, `ufc_in_progress=0`); **cevap üretilmez** |
+| RX / UFC RX | Boş (`tvalid=0`); **cevap üretilmez**. `ufc_in_progress` boşta seviyesinde: varsayılan **1** (active-low varsayımı), `UFC_IN_PROGRESS_IDLE` parametresiyle 0 yapılabilir |
 | Kullanıcı verisi | Yalnızca **alt 128 bit** log'lanır (+ `tkeep`, `tlast`) |
 
 Log örneği (`aurora_obs_<birim>.txt`, zamanlar ns):

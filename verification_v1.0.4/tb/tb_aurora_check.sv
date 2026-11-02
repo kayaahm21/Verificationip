@@ -77,7 +77,7 @@ module tb_aurora_check;
         chk(refclk_out === refclk, "gt_refclk1_out = gt_refclk1_p");
 
         // A3
-        chk(!rx_valid && !ufc_rx_valid && !ufc_inprog, "A3 RX arayuzleri bos (cevap yok)");
+        chk(!rx_valid && !ufc_rx_valid && ufc_inprog === 1'b1, "A3 RX bos, ufc_in_progress bosta seviyesinde (1, active-low)");
 
         // A4: UFC TX. Surucu negedge'de surulur, DUT posedge'de ornekler (simulator yaris kosullarindan bagimsiz).
         @(negedge user_clk);

@@ -34,6 +34,7 @@
 module aurora_64b66b_vip #(
     parameter UNIT_NAME      = "shob_1",   // log dosyasi adi: aurora_obs_<UNIT_NAME>.txt
     parameter LOG_ENABLE     = 1,          // 0: log yazma
+    parameter UFC_IN_PROGRESS_IDLE = 1,     // ufc_in_progress bosta seviyesi (active-low ise 1)
     parameter LINK_UP_CLKS   = 625         // reset'ten sonra channel_up'a kadar gecen user_clk sayisi (~5 us)
 )(
     // ---- TX AXI4-S (USER_DATA_S_AXIS_TX) ----
@@ -153,7 +154,7 @@ module aurora_64b66b_vip #(
     assign m_axi_ufc_rx_tkeep  = 24'd0;
     assign m_axi_ufc_rx_tlast  = 1'b0;
     assign m_axi_ufc_rx_tvalid = 1'b0;
-    assign ufc_in_progress     = 1'b0;
+    assign ufc_in_progress     = UFC_IN_PROGRESS_IDLE[0];   // bosta seviyesi (active-low ise 1)
 
     // ---- Kullanici verisi: her zaman kabul ----
     assign s_axi_tx_tready = 1'b1;
@@ -241,7 +242,7 @@ module aurora_64b66b_vip #(
     assign s_axi_ufc_tx_tready = 1'b0;
     assign m_axi_ufc_rx_tdata = 192'd0; assign m_axi_ufc_rx_tkeep = 24'd0;
     assign m_axi_ufc_rx_tlast = 1'b0;   assign m_axi_ufc_rx_tvalid = 1'b0;
-    assign ufc_in_progress = 1'b0;
+    assign ufc_in_progress = UFC_IN_PROGRESS_IDLE[0];
     assign txp = 3'b000;  assign txn = 3'b111;
     assign gt_refclk1_out = gt_refclk1_p;
     assign hard_err = 1'b0; assign soft_err = 1'b0;
