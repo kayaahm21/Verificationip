@@ -1,0 +1,265 @@
+`timescale 1ns / 1ps
+
+// =====================================================================
+// tb_aurora_check : Aurora gozlemci VIP'inin (v1.0.5) kendi kendini kontrol eden testi
+//
+// Tasarim (FPGA) rolunu taklit eder:
+//   A1  user_clk_out 125 MHz (8 ns periyot)
+//   A2  reset/link sirasi: gt_powergood -> gt_pll_lock -> sys_reset_out biter -> channel_up/lane_up
+//   A3  RX arayuzleri bos (cevap uretilmez)
+//   A4  UFC TX: ufc_tx_req + ms=3 -> s_axi_ufc_tx_tready gelir; veri beat'i kabul edilir
+//   A5  kullanici verisi her zaman kabul edilir; log'a alt 128 bit yazilir
+//   C1  0000E003 (len=0) istegine 1 us sonra 0000E004 (len=184) cevabi: 48 UFC kelimesi, alan duzeni
+//   C2  diger mesaj ID'lerine cevap verilmez
+//   A6  reset_pb ile link yeniden kurulur
+//   A7  log dosyasi beklenen satirlari icerir
+// =====================================================================
+module tb_aurora_check;
+    reg  [191:0] tx_tdata = 192'd0;
+    reg  [23:0]  tx_tkeep = 24'd0;
+    reg          tx_tlast = 1'b0, tx_tvalid = 1'b0;
+    wire         tx_tready;
+    reg          ufc_req = 1'b0;
+    reg  [7:0]   ufc_ms  = 8'd3;
+    reg  [191:0] ufc_tdata = 192'd0;
+    reg          ufc_tvalid = 1'b0;
+    wire         ufc_tready;
+    reg          reset_pb = 1'b0, pma_init = 1'b0;
+    reg          refclk = 1'b0;
+    always #2 refclk = ~refclk;     // 250 MHz referans
+
+    wire         user_clk, channel_up, sys_reset, gt_reset, pll_lock, link_reset;
+    wire [0:2]   lane_up;
+    wire [2:0]   powergood;
+    wire         rx_valid, ufc_rx_valid, ufc_inprog, refclk_out;
+    wire [191:0] ufc_rx_tdata;
+    wire [23:0]  ufc_rx_tkeep;
+    wire         ufc_rx_tlast;
+
+    aurora_64b66b_vip #(.UNIT_NAME("tb"), .LINK_UP_CLKS(625)) dut (
+        .s_axi_tx_tdata(tx_tdata), .s_axi_tx_tlast(tx_tlast), .s_axi_tx_tkeep(tx_tkeep),
+        .s_axi_tx_tvalid(tx_tvalid), .s_axi_tx_tready(tx_tready),
+        .m_axi_rx_tdata(), .m_axi_rx_tlast(), .m_axi_rx_tkeep(), .m_axi_rx_tvalid(rx_valid),
+        .ufc_tx_req(ufc_req), .ufc_tx_ms(ufc_ms), .s_axi_ufc_tx_tdata(ufc_tdata),
+        .s_axi_ufc_tx_tvalid(ufc_tvalid), .s_axi_ufc_tx_tready(ufc_tready),
+        .m_axi_ufc_rx_tdata(ufc_rx_tdata), .m_axi_ufc_rx_tkeep(ufc_rx_tkeep), .m_axi_ufc_rx_tlast(ufc_rx_tlast),
+        .m_axi_ufc_rx_tvalid(ufc_rx_valid), .ufc_in_progress(ufc_inprog),
+        .rxp(3'b000), .rxn(3'b111), .txp(), .txn(),
+        .gt_refclk1_p(refclk), .gt_refclk1_n(~refclk), .gt_refclk1_out(refclk_out),
+        .hard_err(), .soft_err(), .channel_up(channel_up), .lane_up(lane_up),
+        .crc_pass_fail_n(), .crc_valid(),
+        .user_clk_out(user_clk), .mmcm_not_locked_out(), .sync_clk_out(),
+        .reset_pb(reset_pb), .gt_rxcdrovrden_in(1'b0), .power_down(1'b0), .loopback(3'b000),
+        .pma_init(pma_init), .gt_pll_lock(pll_lock),
+        .init_clk(refclk), .link_reset_out(link_reset), .gt_powergood(powergood),
+        .sys_reset_out(sys_reset), .gt_reset_out(gt_reset), .tx_out_clk()
+    );
+
+    integer errors = 0;
+    task chk(input cond, input [8*64-1:0] msg);
+        if (!cond) begin $display("[TB] HATA: %0s", msg); errors = errors + 1; end
+        else       $display("[TB] tamam: %0s", msg);
+    endtask
+
+
+    // ---- v1.0.5: UFC kelime gonderme + cevap yakalama ----
+    // Surucu negedge'de surulur (DUT posedge'de ornekler); her kelime ayri 4 baytlik UFC mesaji (ms=3)
+    task send_ufc_word(input [31:0] w);
+        begin
+            @(negedge user_clk);
+            ufc_req <= 1'b1; ufc_ms <= 8'd3;
+            @(negedge user_clk);
+            ufc_req <= 1'b0; ufc_tdata <= {160'd0, w}; ufc_tvalid <= 1'b1;
+            @(negedge user_clk);
+            ufc_tvalid <= 1'b0;
+            @(negedge user_clk);
+        end
+    endtask
+
+    reg [31:0] rxw [0:127];
+    integer    rx_n = 0;
+    realtime   rx_first_t = 0, req_end_t = 0;
+    integer    rx_badkeep = 0, rx_badlast = 0, rx_badip = 0;
+    // negedge'de ornekle: tvalid tam bir clock yuksek kalir, bir kez gorulur
+    always @(negedge user_clk) begin
+        if (ufc_rx_valid) begin
+            if (rx_n == 0) rx_first_t = $realtime;
+            rxw[rx_n] = ufc_rx_tdata[31:0];
+            rx_n = rx_n + 1;
+            if (ufc_rx_tkeep !== 24'h00000F) rx_badkeep = rx_badkeep + 1;
+            if (ufc_rx_tlast !== 1'b1)       rx_badlast = rx_badlast + 1;
+            if (ufc_inprog   !== 1'b0)       rx_badip   = rx_badip + 1;   // islemde = 0 (active-low)
+        end
+    end
+
+    // cevap bayt'larini kelimelerden (little-endian) geri cozer
+    function [7:0] rbyte(input integer i);   // i: veri bayt indeksi 0..183
+        reg [31:0] w;
+        begin
+            w = rxw[2 + i/4];
+            rbyte = w >> (8 * (i % 4));
+        end
+    endfunction
+    function [15:0] r16(input integer i);
+        r16 = {rbyte(i+1), rbyte(i)};
+    endfunction
+    function [31:0] r32(input integer i);
+        r32 = {rbyte(i+3), rbyte(i+2), rbyte(i+1), rbyte(i)};
+    endfunction
+
+    // ---- A1: saat periyodu ----
+    realtime t0, t1;
+    initial begin
+        // A1
+        @(posedge user_clk); t0 = $realtime;
+        @(posedge user_clk); t1 = $realtime;
+        chk((t1 - t0) == 8.0, "A1 user_clk_out periyodu 8 ns (125 MHz)");
+
+        // A2
+        chk(!channel_up && sys_reset && gt_reset, "A2 reset sirasinda channel_up=0, resetler aktif");
+        wait (powergood == 3'b111);
+        wait (pll_lock);
+        wait (!gt_reset);
+        chk(sys_reset, "A2 gt_reset bittiginde sys_reset hala aktif");
+        wait (!sys_reset);
+        chk(!channel_up, "A2 sys_reset bittiginde channel_up henuz 0");
+        wait (channel_up);
+        chk(lane_up == 3'b111 && !link_reset, "A2 channel_up: lane_up=111, link_reset_out=0");
+        chk(refclk_out === refclk, "gt_refclk1_out = gt_refclk1_p");
+
+        // A3
+        chk(!rx_valid && !ufc_rx_valid && ufc_inprog === 1'b1, "A3 RX bos, ufc_in_progress bosta seviyesinde (1, active-low)");
+
+        // A4: UFC TX. Surucu negedge'de surulur, DUT posedge'de ornekler (simulator yaris kosullarindan bagimsiz).
+        @(negedge user_clk);
+        chk(!ufc_tready, "A4 istek yokken ufc tready=0");
+        ufc_req <= 1'b1; ufc_ms <= 8'd3;
+        @(negedge user_clk);            // arada bir posedge: DUT istegi gordu, busy=1
+        ufc_req    <= 1'b0;
+        ufc_tdata  <= {160'd0, 32'hCAFEF00D};
+        ufc_tvalid <= 1'b1;
+        #1;
+        chk(ufc_tready, "A4 ufc_tx_req sonrasi s_axi_ufc_tx_tready geldi (tvalid=1 iken)");
+        @(negedge user_clk);            // arada bir posedge: el sikismasi tamamlandi
+        ufc_tvalid <= 1'b0;
+        #1;
+        chk(!ufc_tready, "A4 tek beat'ten sonra tready=0");
+
+        // A4 tek kelime (ID=cafef00d) yolladi; mesaj birlestirici icin LEN kelimesiyle (0) mesaji tamamla
+        send_ufc_word(32'h00000000);
+
+        // A5: kullanici verisi, ust 64 bit dolu ama log alt 128 biti yazar
+        @(posedge user_clk);
+        tx_tdata  <= {64'hDEADDEADDEADDEAD, 128'h00112233445566778899AABBCCDDEEFF};
+        tx_tkeep  <= 24'h00FFFF;
+        tx_tlast  <= 1'b1;
+        tx_tvalid <= 1'b1;
+        @(posedge user_clk);
+        chk(tx_tready, "A5 s_axi_tx_tready=1");
+        tx_tvalid <= 1'b0; tx_tlast <= 1'b0;
+        repeat (3) @(posedge user_clk);
+
+
+        // C1: CIT istegi (0000E003, len=0) -> iki UFC mesaji: ID, LEN
+        send_ufc_word(32'h0000E003);
+        send_ufc_word(32'h00000000);
+        req_end_t = $realtime;
+        wait (rx_n >= 48);
+        repeat (6) @(negedge user_clk);
+        chk(rx_n == 48, "C1 cevap 48 UFC kelimesi");
+        chk(rxw[0] == 32'h0000E004, "C1 kelime0 = 0000E004 (mesaj ID)");
+        chk(rxw[1] == 32'd184, "C1 kelime1 = 184 (LEN)");
+        chk((rx_first_t - req_end_t) >= 1000.0 && (rx_first_t - req_end_t) < 1100.0, "C1 cevap istekten ~1 us sonra");
+        chk(rx_badkeep == 0 && rx_badlast == 0, "C1 her kelime: tkeep=0xF, tlast=1");
+        chk(rx_badip == 0, "C1 cevap beat'inde ufc_in_progress islemde seviyesinde (0)");
+        chk(ufc_inprog === 1'b1, "C1 cevap sonrasi ufc_in_progress bosta (1)");
+        begin : cit_check
+            integer k, j, ok_zero, ok_temp, ok_vi, ok_res;
+            reg [31:0] tm;
+            ok_zero = 1; ok_temp = 1; ok_vi = 1; ok_res = 1;
+            for (k = 0; k < 4; k = k + 1) begin
+                for (j = 0; j < 8; j = j + 1)  if (rbyte(46*k + j) !== 8'h00) ok_zero = 0;
+                for (j = 0; j < 14; j = j + 1) if ($signed(rbyte(46*k + 8 + j)) < 20 || $signed(rbyte(46*k + 8 + j)) > 60) ok_temp = 0;
+                // [0]: akim 1000..3000 mA, [1..7]: gerilim 900..13000 mV
+                if (r16(46*k + 26) < 1000 || r16(46*k + 26) > 3000) ok_vi = 0;
+                for (j = 1; j < 8; j = j + 1)
+                    if (r16(46*k + 26 + 2*j) < 900 || r16(46*k + 26 + 2*j) > 13000) ok_vi = 0;
+                for (j = 0; j < 4; j = j + 1)  if (rbyte(46*k + 42 + j) !== 8'h00) ok_res = 0;
+            end
+            chk(ok_zero, "C1 her blok: ilk 8 bayt 0");
+            chk(ok_temp, "C1 14 sicaklik gercekci aralikta (int8, 20..60 C)");
+            chk(ok_vi, "C1 8 x uint16: akim ve gerilimler gercekci aralikta");
+            chk(ok_res, "C1 her blok: son 4 bayt reserved = 0");
+            tm = r32(22);
+            chk(tm >= 273600 && tm < 273700, "C1 cihaz saati (uint32, saniye) = ofset + sim suresi");
+            chk(r32(46 + 22) == tm && r32(92 + 22) == tm && r32(138 + 22) == tm, "C1 dort blokta saat ayni");
+            chk(r16(26) == 1250 && r16(46 + 26) == 1400 && r16(92 + 26) == 1550 && r16(138 + 26) == 1700, "C1 akimlar blok basina 1250 + 150*k mA");
+            chk(r16(28) == 12000 && r16(30) == 5000 && r16(138 + 28) == 11985, "C1 gerilim ornekleri (12000, 5000 mV; blok3: 11985)");
+        end
+
+        // C2: tanimsiz mesaj ID'sine (0000E005, len=0) cevap verilmez
+        rx_n = 0;
+        send_ufc_word(32'h0000E005);
+        send_ufc_word(32'h00000000);
+        repeat (400) @(negedge user_clk);
+        chk(rx_n == 0, "C2 tanimsiz mesaj ID'sine cevap yok");
+
+        // A6: reset_pb link'i dusurur, birakinca yeniden kurar
+        reset_pb <= 1'b1;
+        repeat (3) @(posedge user_clk);
+        chk(!channel_up && sys_reset, "A6 reset_pb ile channel_up=0, sys_reset aktif");
+        reset_pb <= 1'b0;
+        wait (channel_up);
+        chk(channel_up, "A6 reset_pb birakilinca link yeniden kuruldu");
+
+        #100;
+        check_log;
+
+        if (errors == 0) $display("[TB] *** TUM TESTLER GECTI ***");
+        else             $display("[TB] *** %0d HATA ***", errors);
+        $finish;
+    end
+
+    // ---- A7: log dosyasi icerigi (SystemVerilog string ile) ----
+    task check_log;
+        integer fd, code;
+        string  line;
+        bit got_req = 0, got_ufc = 0, got_user = 0, got_link = 0, got_idle = 1, got_plan = 0, got_done = 0, got_msg = 0;
+        begin
+            fd = $fopen("aurora_obs_tb.txt", "r");
+            chk(fd != 0, "A7 log dosyasi acildi");
+            while (fd != 0 && !$feof(fd)) begin
+                line = "";
+                code = $fgets(line, fd);
+                if (code == 0) break;
+                if (has(line, "UFC_REQ ms=3 (4 bayt)")) got_req = 1;
+                if (has(line, "UFC_TX tdata=") && has(line, "cafef00d")) got_ufc = 1;
+                if (has(line, "USER_TX lo128=00112233445566778899aabbccddeeff keep=00ffff last=1")) got_user = 1;
+                if (has(line, "LINK channel_up=1 lane_up=111")) got_link = 1;
+                if (has(line, "UFC_MSG id=0000e003 len=0")) got_msg = 1;
+                if (has(line, "UFC_RESP planlandi id=0000e004 len=184")) got_plan = 1;
+                if (has(line, "UFC_RESP bitti")) got_done = 1;
+                if (has(line, "deadbeef") || has(line, "dead")) got_idle = 0;   // ust 64 bit log'a girmemeli
+            end
+            if (fd != 0) $fclose(fd);
+            chk(got_req,  "A7 log: UFC_REQ ms=3 (4 bayt)");
+            chk(got_ufc,  "A7 log: UFC_TX ham veri");
+            chk(got_user, "A7 log: USER_TX alt 128 bit");
+            chk(got_link, "A7 log: LINK channel_up=1");
+            chk(got_idle, "A7 log: ust 64 bit yazilmadi");
+            chk(got_msg && got_plan && got_done, "A7 log: UFC_MSG, UFC_RESP planlandi/bitti");
+        end
+    endtask
+
+    function automatic bit has(string s, string sub);
+        for (int i = 0; i + sub.len() <= s.len(); i++)
+            if (s.substr(i, i + sub.len() - 1) == sub) return 1'b1;
+        return 1'b0;
+    endfunction
+
+    initial begin
+        #200000;
+        $display("[TB] HATA: zaman asimi");
+        $finish;
+    end
+endmodule
