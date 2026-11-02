@@ -56,7 +56,7 @@ Log'a yeni satırlar: `UFC_MSG id=… len=…`, `UFC_RESP planlandi …`, `UFC_R
 **Not:** v1.0.5'te SystemVerilog alternatifi (`alt/`) yoktur; `.sv` sürümü yalnızca v1.0.4'tedir (gözlemci).
 8b10b VIP (IÜB) değişmedi.
 
-## v1.0.5'te neler değişti
+## v1.0.4'te neler değişti (v1.0.3'e göre)
 
 PCIe tarafı (v1.0.3'e göre):
 1. **BAR ID**: senaryo satırında `ADRES [BAR<n>] MSGID LEN DATA...` (yoksa BAR0). Descriptor DW3[18:16]'ya yazılır. BAR aperture kullanılmaz.
@@ -207,5 +207,5 @@ Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır
 ## Sürümler
 - `verification_v1.0.2/`: CPU→FPGA, senaryo + HB.
 - `verification_v1.0.3/`: + FPGA→CPU işlemci modeli (tek buffer).
-- `verification_v1.0.5/` (bu klasör): BAR ID, 4 buffer + MSI vektörü, ayrı dosyalar, Aurora gözlemci VIP.
+- `verification_v1.0.4/`: BAR ID, 4 buffer + MSI vektörü, ayrı dosyalar, Aurora gözlemci VIP.
 - `verification_v1.0.5/` (bu klasör): v1.0.4 + SHOB CİT cevabı (0000E003 → 0000E004).
