@@ -176,6 +176,15 @@ Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır
 - `tx_out_clk` 125 MHz üretir (BD'deki BUFG_GT zinciri bunu kullanır). Link modeli dahili saatle çalışır; kullanıcı verisi (`s_axi_tx_*`) log'u **`user_clk`** girişiyle örneklenir (BD'de bu saat SHOB IP'sinin `user_clk_out`'undan gelir, `user_clk` ve `sync_clk` aynı düğüme bağlıdır). Bu yüzden SHOB VIP'i de aktif olmalıdır.
 - Link sayacı `reset`/`gt_reset`/`power_down`'ın **yükselen kenarında** yeniden başlar (seviyeye bağlı değil: BD `reset`'i `sys_reset_out`'tan türetiyorsa kilitlenme olmasın).
 - Log: `aurora8b10b_obs_<UNIT_NAME>.txt`.
+- **v1.0.5: mesaj birleştirme.** `user_data_s_axis_tx` (32 bit) beat'leri `tlast`'a kadar toplanır; mesaj biçimi
+  `ID (4 B) + LEN (4 B) + LEN bayt veri`. `tkeep`'te 1 olan baytlar sırayla alınır (ilk bayt `tdata[7:0]`; kısmi son beat
+  desteklenir). ID ve LEN, ilk iki 32 bitlik kelimenin sayısal değeridir. Obs dosyasına her mesaj için bir satır yazılır:
+  ```
+  5100 MSG id=00001234 len=8 data=11 22 33 44 55 66 77 88
+  5044 MSG id=0000e003 len=0 data=
+  ```
+  Ham beat satırları (`USER_TX data=… keep=… last=…`) de kalır. 8 bayttan kısa mesaj `MSG_KISA`, `LEN` ile gelen bayt sayısı
+  uyuşmazsa `MSG_UYARI` yazılır. **Cevap üretilmez** (gözlemci); cevap sonraki adım.
 - BD'de dış portlar için: `make_iub_externals aurora_8b10b_vip_0` (`tools/bd_externals_aurora.tcl`).
 - Aurora'ya özgü arayüzler (CORE_CONTROL/CORE_STATUS/GT_SERIAL) 64b66b VIP'teki gibi **paketlenmemiştir** (düz pin); AXI-Stream arayüzleri `USER_DATA_S_AXIS_TX`/`USER_DATA_M_AXIS_RX` paketlidir.
 

@@ -6,7 +6,7 @@
 // Hedef: Aurora_aurora_8b10b_0_2 (1 lane, 32 bit AXI-S, Framing, Duplex, UFC YOK) modulunun portlariyla
 // ayni portlara sahip olmak. DRP portlari (gt0_drp*) bilerek YOKTUR (IP'de de yoktu; hata kaynagiydi).
 //
-// Gozlemci davranisi (aurora_64b66b_vip ile ayni mantik):
+// Gozlemci davranisi (aurora_64b66b_vip ile ayni mantik; v1.0.5: gelen mesaj ID+LEN+veri olarak birlestirilip loglanir):
 //   * Link modeli: 125 MHz saat (tx_out_clk), reset/powergood/lock sirasi, channel_up/lane_up
 //   * s_axi_tx_* her zaman kabul edilir (tready=1) ve log dosyasina yazilir
 //   * RX tarafi bostur (cevap uretilmez)
@@ -156,13 +156,60 @@ module aurora_8b10b_vip #(
         end
     end
 
+    // =================================================================
     // Kullanici verisi: tasarimin s_axi_tx_* sinyalleri user_clk ile (BD'de SHOB IP'sinden gelen saat)
-    // surulur; yaris kosullarindan kacinmak icin veri user_clk girisiyle orneklenir.
+    // surulur; yaris kosullarindan kacinmak icin user_clk girisiyle orneklenir.
+    //
+    // v1.0.5: Mesaj birlestirme. Mesaj bicimi: ID (4 bayt) + LEN (4 bayt, veri bayt sayisi) + veri.
+    // 32 bitlik beat'ler tlast'a kadar toplanir (tkeep'te 1 olan baytlar sirayla, ilk bayt tdata[7:0]).
+    // ID ve LEN, ilk iki 32 bitlik kelimenin sayisal degeridir (SHOB tarafindaki UFC kelimeleriyle ayni).
+    // Mesaj bitince obs dosyasina "MSG id=... len=... data=BYTE0 BYTE1 ..." satiri yazilir.
+    // Cevap uretilmez (gozlemci).
+    // =================================================================
+    reg [7:0] mb [0:2047];       // toplanan mesaj baytlari
+    integer   mcount = 0;        // toplanan bayt sayisi
+    integer   mi;
+    reg [31:0] m_id, m_len;
+
+    task iub_msg_done;
+        begin
+            if (mcount < 8) begin
+                if (fd != 0) begin
+                    $fdisplay(fd, "%0d MSG_KISA bayt=%0d (en az 8 bayt: ID+LEN gerekir), yok sayildi", $time, mcount);
+                    $fflush(fd);
+                end
+            end else begin
+                m_id  = {mb[3], mb[2], mb[1], mb[0]};
+                m_len = {mb[7], mb[6], mb[5], mb[4]};
+                if (fd != 0) begin
+                    $fwrite(fd, "%0d MSG id=%h len=%0d data=", $time, m_id, m_len);
+                    for (mi = 8; mi < mcount && mi < 2048; mi = mi + 1) begin
+                        if (mi > 8) $fwrite(fd, " ");
+                        $fwrite(fd, "%h", mb[mi]);
+                    end
+                    $fwrite(fd, "\n");
+                    if (m_len != mcount - 8)
+                        $fdisplay(fd, "%0d MSG_UYARI len=%0d ama %0d veri bayti geldi", $time, m_len, mcount - 8);
+                    $fflush(fd);
+                end
+            end
+            mcount = 0;
+        end
+    endtask
+
     always @(posedge user_clk) begin
-        if (s_axi_tx_tvalid && s_axi_tx_tready && fd != 0) begin
-            $fdisplay(fd, "%0d USER_TX data=%h keep=%h last=%0d", $time,
-                      s_axi_tx_tdata, s_axi_tx_tkeep, s_axi_tx_tlast);
-            $fflush(fd);
+        if (s_axi_tx_tvalid && s_axi_tx_tready) begin
+            if (fd != 0) begin
+                $fdisplay(fd, "%0d USER_TX data=%h keep=%h last=%0d", $time,
+                          s_axi_tx_tdata, s_axi_tx_tkeep, s_axi_tx_tlast);
+                $fflush(fd);
+            end
+            for (mi = 0; mi < 4; mi = mi + 1)
+                if (s_axi_tx_tkeep[mi]) begin
+                    if (mcount < 2048) mb[mcount] = s_axi_tx_tdata[8*mi +: 8];
+                    mcount = mcount + 1;
+                end
+            if (s_axi_tx_tlast) iub_msg_done;
         end
     end
 
