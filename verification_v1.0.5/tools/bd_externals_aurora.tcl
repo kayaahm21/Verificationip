@@ -36,8 +36,19 @@ proc make_aurora_externals {cell prefix} {
     foreach {pin ext} $map {
         set p [get_bd_pins -quiet $cell/$pin]
         if {$p eq ""} { puts "UYARI: $cell/$pin bulunamadi"; continue }
+        # ayni adda onceden (ornegin import ile 1 bitlik vektor olarak) olusmus port varsa sil, scalar olarak yeniden ac
+        set old [get_bd_ports -quiet $ext]
+        if {$old ne ""} { delete_bd_objs $old; puts "silindi (yeniden olusturulacak): $ext" }
         make_bd_pins_external -name $ext $p
         puts "$cell/$pin -> $ext"
+    }
+    # GT_DIFF_REFCLK1 (diff_clock arayuzu): dis arayuz portu <ONEK>_GT_DIFF_REFCLK; import ile bozulduysa yeniden olustur
+    set refpin [get_bd_intf_pins -quiet $cell/GT_DIFF_REFCLK1]
+    if {$refpin ne ""} {
+        set oldr [get_bd_intf_ports -quiet ${prefix}_GT_DIFF_REFCLK]
+        if {$oldr ne ""} { delete_bd_objs $oldr; puts "silindi (yeniden olusturulacak): ${prefix}_GT_DIFF_REFCLK" }
+        make_bd_intf_pins_external -name ${prefix}_GT_DIFF_REFCLK $refpin
+        puts "$cell/GT_DIFF_REFCLK1 -> ${prefix}_GT_DIFF_REFCLK"
     }
 }
 
@@ -74,6 +85,9 @@ proc make_iub_externals {cell} {
     foreach {pin ext} $map {
         set p [get_bd_pins -quiet $cell/$pin]
         if {$p eq ""} { puts "UYARI: $cell/$pin bulunamadi"; continue }
+        # ayni adda onceden (ornegin import ile 1 bitlik vektor olarak) olusmus port varsa sil, scalar olarak yeniden ac
+        set old [get_bd_ports -quiet $ext]
+        if {$old ne ""} { delete_bd_objs $old; puts "silindi (yeniden olusturulacak): $ext" }
         make_bd_pins_external -name $ext $p
         puts "$cell/$pin -> $ext"
     }
