@@ -7,6 +7,8 @@
 //   B3  RX bos
 //   B4  kullanici verisi her zaman kabul edilir ve log'a yazilir
 //   B7  gelen mesaj (ID+LEN+veri, 32 bit beat'ler, tlast) birlestirilip log'a yazilir: len=0, len=8, len=6 (kismi son beat)
+//   B8  HUZPAR: istek 00000001 (M=N=4, LEN=2872, 720 beat) -> 1 us sonra 00000002 cevabi (LEN=24, 8 beat): huzme ID, gclk, 4 x huzme ID
+//   B9  diger ID'lere cevap yok; LEN uyusmazligi uyari verir ama cevap yine gelir
 //   B5  reset yukselen kenari linki yeniden baslatir; reset SEVIYESI tutulsa da kilitlenme olmaz
 // =====================================================================
 module tb_aurora8b_check;
@@ -18,13 +20,16 @@ module tb_aurora8b_check;
     reg         refclk = 1'b0;
     always #2 refclk = ~refclk;
 
+    wire [31:0] rx_tdata;
+    wire [3:0]  rx_tkeep;
+    wire        rx_tlast;
     wire        clk, channel_up, sys_reset, tx_lock, link_reset, rx_valid;
     wire [0:0]  lane_up, powergood;
 
     aurora_8b10b_vip #(.UNIT_NAME("tb"), .LINK_UP_CLKS(625)) dut (
         .s_axi_tx_tdata(tx_tdata), .s_axi_tx_tkeep(tx_tkeep), .s_axi_tx_tvalid(tx_tvalid),
         .s_axi_tx_tlast(tx_tlast), .s_axi_tx_tready(tx_tready),
-        .m_axi_rx_tdata(), .m_axi_rx_tkeep(), .m_axi_rx_tvalid(rx_valid), .m_axi_rx_tlast(),
+        .m_axi_rx_tdata(rx_tdata), .m_axi_rx_tkeep(rx_tkeep), .m_axi_rx_tvalid(rx_valid), .m_axi_rx_tlast(rx_tlast),
         .rxp(1'b0), .rxn(1'b1), .txp(), .txn(), .gt_refclk1(refclk),
         .frame_err(), .hard_err(), .soft_err(), .lane_up(lane_up), .channel_up(channel_up),
         .crc_pass_fail_n(), .crc_valid(),
@@ -55,6 +60,22 @@ module tb_aurora8b_check;
             repeat (2) @(negedge clk);
         end
     endtask
+
+
+    // ---- v1.0.5: RX cevap yakalama (negedge'de ornekle: tvalid tam bir clock yuksek kalir) ----
+    reg [31:0] rxw [0:63];
+    integer    rx_n = 0;
+    realtime   rx_first_t = 0, req_end_t = 0;
+    integer    rx_badkeep = 0, rx_badlast = 0, rx_lastcnt = 0;
+    always @(negedge clk) begin
+        if (rx_valid) begin
+            if (rx_n == 0) rx_first_t = $realtime;
+            rxw[rx_n] = rx_tdata;
+            rx_n = rx_n + 1;
+            if (rx_tkeep !== 4'hF) rx_badkeep = rx_badkeep + 1;
+            if (rx_tlast)          rx_lastcnt = rx_lastcnt + 1;
+        end
+    end
 
     realtime t0, t1;
     initial begin
@@ -104,6 +125,48 @@ module tb_aurora8b_check;
         send_beat(32'hDDCCBBAA, 4'hF, 1'b1);
         end_msg;
 
+        // B8/B9: onceki mesajlara (ID 0000E003, 00001234, 0000ABCD, 00005678) cevap verilmemis olmali
+        chk(rx_n == 0, "B9 HUZPAR disindaki mesaj ID'lerine cevap yok");
+
+        // B8: HUZPAR istegi: ID 00000001, LEN=2872 (M=N=4, F=0): huzme ID + 28 + 8 + 4 x 708 bayt
+        begin : huzpar_test
+            integer k, ok_first;
+            reg [31:0] lf, hz;
+            hz = 32'h12345678;
+            lf = 32'hACE1;
+            send_beat(32'h00000001, 4'hF, 1'b0);          // ID
+            send_beat(32'd2872,     4'hF, 1'b0);          // LEN (yalniz veri)
+            send_beat(hz,           4'hF, 1'b0);          // veri[0..3] = huzme ID
+            for (k = 1; k < 718; k = k + 1) begin         // kalan 2868 bayt = 717 kelime (rastgele)
+                lf = lf * 32'd1664525 + 32'd1013904223;
+                send_beat(lf, 4'hF, (k == 717));
+            end
+            req_end_t = $realtime;
+            end_msg;
+            wait (rx_n >= 8);
+            repeat (6) @(negedge clk);
+            chk(rx_n == 8, "B8 cevap 8 beat (32 bayt)");
+            chk(rxw[0] == 32'h00000002, "B8 kelime0 = 00000002 (cevap mesaj ID)");
+            chk(rxw[1] == 32'd24, "B8 kelime1 = 24 (LEN = 4*M + 8)");
+            chk(rxw[2] == hz, "B8 huzme ID istekten aynen geri yansitildi");
+            chk(rxw[3] != 32'd0, "B8 huzme basi zamani (gclk) sayac degeri, sifir degil");
+            chk(rxw[4] == hz && rxw[5] == hz && rxw[6] == hz && rxw[7] == hz, "B8 4 ADK cevabi = huzme ID");
+            chk((rx_first_t - req_end_t) >= 1000.0 && (rx_first_t - req_end_t) < 1100.0, "B8 cevap istekten ~1 us sonra");
+            chk(rx_badkeep == 0, "B8 her beat: tkeep=0xF");
+            chk(rx_lastcnt == 1, "B8 tlast yalnizca son beat'te (bir kez)");
+        end
+
+        // B9: LEN uyusmazligi: ID 00000001, LEN=8 (veri: huzme ID + 4 bayt) -> uyari + cevap yine gelir
+        rx_n = 0; rx_lastcnt = 0;
+        send_beat(32'h00000001, 4'hF, 1'b0);
+        send_beat(32'h00000008, 4'hF, 1'b0);
+        send_beat(32'h0000BEEF, 4'hF, 1'b0);
+        send_beat(32'h00000000, 4'hF, 1'b1);
+        end_msg;
+        wait (rx_n >= 8);
+        repeat (6) @(negedge clk);
+        chk(rx_n == 8 && rxw[2] == 32'h0000BEEF && rxw[0] == 32'h00000002, "B9 uyusmayan LEN'de de cevap geldi (huzme ID = 0000BEEF)");
+
         // B5: reset darbesi linki dusurur; seviyesi tutulsa bile sayac ilerler
         @(negedge clk);
         reset <= 1'b1;
@@ -123,7 +186,7 @@ module tb_aurora8b_check;
     task check_log;
         integer fd, code;
         string  line;
-        bit got_user = 0, got_link = 0, got_short = 0, got_m0 = 0, got_m8 = 0, got_m6 = 0, got_warn = 0;
+        bit got_user = 0, got_link = 0, got_short = 0, got_m0 = 0, got_m8 = 0, got_m6 = 0, got_warn = 0, got_hz = 0, got_hzplan = 0, got_hzdone = 0, got_hzwarn = 0;
         begin
             fd = $fopen("aurora8b10b_obs_tb.txt", "r");
             chk(fd != 0, "B6 log dosyasi acildi");
@@ -138,6 +201,10 @@ module tb_aurora8b_check;
                 if (has(line, "MSG id=00001234 len=8 data=11 22 33 44 55 66 77 88")) got_m8 = 1;
                 if (has(line, "MSG id=0000abcd len=6 data=a1 a2 a3 a4 a5 a6")) got_m6 = 1;
                 if (has(line, "MSG_UYARI len=8 ama 4 veri bayti geldi")) got_warn = 1;
+                if (has(line, "MSG id=00000001 len=2872 data=") && has(line, "... (toplam 2872 veri bayti)")) got_hz = 1;
+                if (has(line, "HUZPAR_CEVAP planlandi id=00000002 len=24 huzme_id=12345678")) got_hzplan = 1;
+                if (has(line, "HUZPAR_CEVAP bitti id=00000002")) got_hzdone = 1;
+                if (has(line, "MSG_UYARI HUZPAR len=8, beklenen 2872 (M=4 N=4 F=0)")) got_hzwarn = 1;
             end
             if (fd != 0) $fclose(fd);
             chk(got_user, "B6 log: USER_TX");
@@ -147,6 +214,9 @@ module tb_aurora8b_check;
             chk(got_m8, "B7 log: MSG id=00001234 len=8 + 8 bayt veri");
             chk(got_m6, "B7 log: MSG id=0000abcd len=6 + 6 bayt (kismi son beat)");
             chk(got_warn, "B7 log: len uyusmazligi icin MSG_UYARI");
+            chk(got_hz, "B8 log: MSG id=00000001 len=2872 (veri kisaltildi)");
+            chk(got_hzplan && got_hzdone, "B8 log: HUZPAR_CEVAP planlandi/bitti");
+            chk(got_hzwarn, "B9 log: HUZPAR beklenen LEN uyarisi");
         end
     endtask
 

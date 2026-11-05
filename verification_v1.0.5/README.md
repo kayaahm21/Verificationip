@@ -169,7 +169,7 @@ Log örneği (`aurora_obs_<birim>.txt`, zamanlar ns):
 5132 USER_TX lo128=00112233445566778899aabbccddeeff keep=00ffff last=1
 ```
 
-## Aurora 8b10b gözlemci VIP (IÜB)
+## Aurora 8b10b VIP (IÜB): gözlem + HUZPAR cevabı
 
 Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır, **DRP portları (`gt0_drp*`) yoktur**.
 - `rxp/rxn/txp/txn/lane_up/gt_powergood` `[0:0]` vektördür (wrapper'daki `std_logic_vector(0 to 0)` ile uyumlu).
@@ -188,6 +188,47 @@ Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır
 - BD'de dış portlar için: `make_iub_externals aurora_8b10b_vip_0` (`tools/bd_externals_aurora.tcl`).
 - Aurora'ya özgü arayüzler (CORE_CONTROL/CORE_STATUS/GT_SERIAL) 64b66b VIP'teki gibi **paketlenmemiştir** (düz pin); AXI-Stream arayüzleri `USER_DATA_S_AXIS_TX`/`USER_DATA_M_AXIS_RX` paketlidir.
 
+### HUZPAR cevabı (v1.0.5)
+
+IÜB'ye **`00000001` (HUZPAR isteği)** gelince **1 µs sonra `00000002` (HUZPAR cevabı)** `m_axi_rx_*` üzerinden
+(32 bit, `tready` yok, beat'ler art arda) verilir. Diğer ID'lere cevap verilmez.
+
+**İstek (`00000001`)**: `ID(4B) + LEN(4B, yalnızca veri) + veri`. Veri alanları:
+
+| Alan | Boyut |
+|---|---|
+| huzme ID | 4 B |
+| IÜB kontrol parametreleri | 28 + F B (F=0) |
+| reserved | 8 B |
+| ADK1 … ADK_M huzpar | M × (172·N + 20) B |
+
+Beklenen `LEN = M·(172·N+20) + 40 + F`. Şimdilik **M=4, N=4** → **2872** B (tel üzerinde 2880 B = 720 beat). Radar için
+M=10, N=24 → 41520 B; `M_ADK`/`N_CORE` parametreleriyle büyütülür (`MAX_MSG_BYTES` varsayılan 65536).
+İçerik (kontrol parametreleri, ADK huzparları) VIP için önemli değildir; yalnızca ilk 4 bayt (huzme ID) kullanılır.
+`LEN` beklenenden farklıysa log'a `MSG_UYARI HUZPAR len=…` yazılır, **cevap yine verilir** (veri ≥ 4 bayt ise).
+
+**Cevap (`00000002`)**: `ID(4B) + LEN(4B) = 4·M + 8` + veri:
+
+| Alan | Boyut | Değer |
+|---|---|---|
+| huzme ID | 4 B | istekteki huzme ID (aynen) |
+| huzme başı zamanı (gclk) | 4 B | isteğin son beat'inde okunan serbest koşan `user_clk` sayacı (`uint32`) |
+| ADK1 … ADK_M cevapları | 4 B × M | her biri huzme ID |
+
+M=4: LEN=24, toplam 32 B = 8 beat. Her beat `tkeep=0xF`, son beat'te `tlast=1`. Değerler `uint32`, **little-endian**
+(ID/LEN sayısal kelime olarak, ilk bayt `tdata[7:0]`).
+
+**Parametreler:** `RESP_ENABLE` (1), `RESP_DELAY_CLKS` (125 = 1 µs), `M_ADK` (4), `N_CORE` (4), `F_EXTRA` (0),
+`MAX_MSG_BYTES` (65536), `LOG_RAW_BEATS` (1; büyük mesajlarda 0 yaparak ham beat satırlarını kapatabilirsiniz),
+`LOG_DATA_BYTES` (64; `MSG` satırına yazılan en fazla veri baytı).
+
+**Log:** `MSG id=00000001 len=2872 data=78 56 34 12 … ... (toplam 2872 veri bayti)`, `HUZPAR_CEVAP planlandi …`,
+`RX idx=… word=…`, `HUZPAR_CEVAP bitti`.
+
+**Varsayımlar (doğrulanmadı):** gclk tanımı (gerçekte HB'de yakalanan bir sayaç olabilir); cevabın `tready` beklenmeden
+verilmesi; BD'deki wrapper'da `iub_user_data_m_axis_rx_tready` girişi görünse de VIP'te `tready` portu yoktur.
+**Açık soru:** 41 KB'lık HUZPAR isteği FPGA'ya PCIe'den nasıl geliyor (birden çok ardışık TLP mi)? Senaryo tarafı buna bağlı.
+
 ## Test
 
 ```bash
@@ -200,7 +241,7 @@ Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır
 | `tb/tb_multi_check.sv` | **4 buffer**, MSI vektörüne göre yönlendirme (yalnız set bit okunur), RSI yok sayma, SHOB2 sarma, ayrı dosyalar |
 | `tb/tb_cq_check.sv` | CPU→FPGA TLP baytları, tkeep/tuser, HB/bekleme zamanlaması, **BAR ID (`BAR2`, `bar5`, varsayılan BAR0)** |
 | `tb/tb_fill_check.sv` | Buffer doldurma / sarma / taşma tespiti |
-| `tb/tb_aurora8b_check.sv` | Aurora 8b10b VIP: 125 MHz, link sırası, RX boş, log, reset kenarı ve kilitlenme yok |
+| `tb/tb_aurora8b_check.sv` | Aurora 8b10b VIP: 125 MHz, link sırası, log, mesaj birleştirme, **HUZPAR cevabı** (720 beat istek → 1 µs sonra 8 beat cevap, huzme ID yansıtma, gclk, tlast/tkeep, diğer ID'lere cevap yok), reset kenarı |
 | `tb/tb_aurora_check.sv` | Aurora VIP (+ **CİT cevabı**: 0000E003 → 0000E004, 48 kelime, alan düzeni, 1 µs gecikme, tanımsız ID'ye cevap yok): 125 MHz, link sırası, UFC el sıkışması, RX boş, log içeriği, `reset_pb` ile yeniden link |
 
 ## Test durumu (dürüst not)
@@ -217,4 +258,4 @@ Dosya: `src/aurora_8b10b_vip.v`. Portlar `Aurora_aurora_8b10b_0_2` ile aynıdır
 - `verification_v1.0.2/`: CPU→FPGA, senaryo + HB.
 - `verification_v1.0.3/`: + FPGA→CPU işlemci modeli (tek buffer).
 - `verification_v1.0.4/`: BAR ID, 4 buffer + MSI vektörü, ayrı dosyalar, Aurora gözlemci VIP.
-- `verification_v1.0.5/` (bu klasör): v1.0.4 + SHOB CİT cevabı (0000E003 → 0000E004).
+- `verification_v1.0.5/` (bu klasör): v1.0.4 + SHOB CİT cevabı (0000E003 → 0000E004) + IÜB mesaj birleştirme ve HUZPAR cevabı (00000001 → 00000002).
