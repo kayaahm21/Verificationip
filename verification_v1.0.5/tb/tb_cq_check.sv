@@ -113,11 +113,11 @@ module tb_cq_check;
         for (int i = 0; i < 100; i++) d2.push_back(8'(i));
 
         // tum senaryo (HB ~1316 ns + 3 TLP + 400 ns bekleme) bitene kadar bekle
-        wait (tlp_bytes.size() == 5);
+        wait (tlp_bytes.size() == 8);
         #200;
 
         $display("---------------- SONUC ----------------");
-        chk(tlp_bytes.size() == 5, "5 TLP bekleniyordu");
+        chk(tlp_bytes.size() == 8, "8 TLP bekleniyordu (5 normal + 3 SPLIT paketi)");
 
         build_expected(32'h12340000, 32'h0000000A, d1, e);
         chk(diff_info(tlp_bytes[0], e) == "", {"TLP1: ", diff_info(tlp_bytes[0], e)});
@@ -136,6 +136,34 @@ module tb_cq_check;
         build_expected(32'h00003000, 32'h0000000E, d3, e);
         e[14] = 8'h05;
         chk(diff_info(tlp_bytes[4], e) == "", {"TLP5 (bar5): ", diff_info(tlp_bytes[4], e)});
+
+
+        // v1.0.5: SPLIT32: 300 baytlik mesaj -> 3 paket (128 + 128 + 52 bayt), ID+LEN yalniz ilkinde, adres 0x4000 hep ayni, BAR1
+        begin : split_test
+            bit [7:0] mb[$];
+            bit [7:0] ex[$];
+            int       offs[3] = '{0, 128, 256};
+            int       lens[3] = '{128, 128, 52};
+            bit [31:0] dw0, dw2;
+            mb.delete();
+            for (int i = 0; i < 4; i++) mb.push_back(32'h0000E001 >> (8*i));
+            for (int i = 0; i < 4; i++) mb.push_back(32'd300 >> (8*i));
+            for (int i = 0; i < 300; i++) mb.push_back(8'((i*7 + 3) & 255));
+            for (int k = 0; k < 3; k++) begin
+                ex.delete();
+                dw0 = {30'h1000, 2'b00};                       // adres 0x4000: dw0 = adres[31:2] << 2
+                dw0 = 32'h00004000;
+                dw2 = 32'(lens[k]/4) | (32'h1 << 11);            // dword sayisi + MemWr
+                for (int i = 0; i < 4; i++) ex.push_back(dw0[8*i +: 8]);
+                for (int i = 0; i < 4; i++) ex.push_back(8'h00);
+                for (int i = 0; i < 4; i++) ex.push_back(dw2[8*i +: 8]);
+                for (int i = 0; i < 4; i++) ex.push_back((i == 2) ? 8'h01 : 8'h00);   // DW3: BAR ID = 1 (bayt 14)
+                for (int i = 0; i < lens[k]; i++) ex.push_back(mb[offs[k] + i]);
+                chk(diff_info(tlp_bytes[5 + k], ex) == "", $sformatf("SPLIT paket %0d: %s", k + 1, diff_info(tlp_bytes[5 + k], ex)));
+            end
+            chk(mb.size() == 308, "SPLIT toplam 308 bayt (8 baslik + 300 veri)");
+            chk(tlp_beats[5] == 5 && tlp_beats[6] == 5 && tlp_beats[7] == 3, $sformatf("SPLIT beat sayilari %0d %0d %0d (beklenen 5 5 3)", tlp_beats[5], tlp_beats[6], tlp_beats[7]));
+        end
 
         // beat sayilari: 32 B -> 1, 124 B -> 4, 24 B -> 1
         chk(tlp_beats[0] == 1, $sformatf("TLP1 beat sayisi %0d (beklenen 1)", tlp_beats[0]));

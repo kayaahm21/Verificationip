@@ -107,13 +107,28 @@ BAR numarası senaryoda satır satır **sen** verirsin; VIP BAR'a göre bir şey
 
 | Satır | Anlamı |
 |---|---|
-| `ADRES [BAR<n>] MSGID LEN BYTE0 BYTE1 ...` | TLP gönder (ADRES, MSGID hex; LEN onluk bayt sayısı, 4'ün katı; `BAR0..BAR6`, büyük/küçük harf) |
+| `ADRES [BAR<n>] [SPLIT<n>] MSGID LEN BYTE0 BYTE1 ...` | TLP gönder (ADRES, MSGID hex; LEN onluk bayt sayısı, 4'ün katı; `BAR0..BAR6`, büyük/küçük harf). **`SPLIT<n>` (v1.0.5):** mesaj (ID+LEN+veri) `n` DWORD'luk paketlere bölünüp her biri ayrı TLP olarak art arda gönderilir; `ID+LEN` yalnızca ilk pakette, adres tüm paketlerde aynı, son paket kısa olabilir. `SPLIT` satırlarında LEN sınırı 1 MB (normal satırda 8192) |
 | `99999999` | Huzme başını bekle |
 | `88888888 <ns>` | `<ns>` nanosaniye bekle |
 | `77777777 <ns>` | `<ns>` sonra huzme başı üret (beklemez) |
 | `# ...` / `// ...` | Yorum |
 
 Her `99999999`'dan önce onu üretecek bir `77777777` olmalı (SCRIPT modunda), yoksa senaryo kilitlenir.
+
+### SHOB HUZPAR ve KATSAYILAR (`0000E001`) senaryosu (v1.0.5)
+
+PCIe'den SHOB'a gidecek hüzme parametre mesajı **32 DWORD'lük (128 bayt) paketlere bölünerek** gönderilir
+(tasarımcının isteği; varsayımlar: `ID+LEN` yalnızca ilk pakette, adres hep 0, paketler art arda, son paket kısa).
+SHOB-1 **BAR1**, SHOB-2 **BAR2** (ICD). Mesaj yapısı (56 bayt başlık + katsayılar, hepsi little-endian):
+huzme ID (4), sinyal işleme durumu (2; 0 Bypass, 1 HO), alma huzmesi sayısı (2), darbe sayısı (4), darbedeki örnek sayısı (4),
+4 × GAÇ kullanım maskesi (4'er), kart kullanım durumu (1), test modu (1), reserved (22); ardından HO'da
+`M × 120 GAÇ × 4 kanal × (I,Q) × int16` = M×1920 bayt katsayı (Bypass'ta katsayı yok, LEN=56).
+
+- Örnek senaryo: `examples/input_shob_huzpar.txt` (HO, M=4, darbe=4, örnek=4; LEN=7736 → 61 paket; SHOB-1 ve SHOB-2).
+- Üretici: `tools/gen_shob_huzpar.py` (`--bar`, `--mode ho|bypass`, `--m`, `--pulses`, `--samples`, `--huzme-id`, `--gac-masks`,
+  `--card`, `--test-mode`, `--split`). Katsayılar rastgele int16 (sabit tohum).
+- SHOB VIP bu mesajı şimdilik yalnızca **gözlemler** (`USER_TX` ham beat satırları); ayrıştırıp ayrı dosyaya yazma sıradaki adım.
+
 
 ### `sim_model_cpu` parametreleri
 
@@ -239,7 +254,7 @@ verilmesi; BD'deki wrapper'da `iub_user_data_m_axis_rx_tready` girişi görünse
 |---|---|
 | `tb/tb_cpu_check.sv` | Tek buffer (SIFPGA): birleşmiş/sahte kesme, sarma, bölünmüş yazma, pointer varyasyonları (11 mesaj) |
 | `tb/tb_multi_check.sv` | **4 buffer**, MSI vektörüne göre yönlendirme (yalnız set bit okunur), RSI yok sayma, SHOB2 sarma, ayrı dosyalar |
-| `tb/tb_cq_check.sv` | CPU→FPGA TLP baytları, tkeep/tuser, HB/bekleme zamanlaması, **BAR ID (`BAR2`, `bar5`, varsayılan BAR0)** |
+| `tb/tb_cq_check.sv` | CPU→FPGA TLP baytları, tkeep/tuser, HB/bekleme zamanlaması, **BAR ID (`BAR2`, `bar5`, varsayılan BAR0)**, **`SPLIT32` (300 B mesaj → 128+128+52 B paketler, başlık yalnız ilkte, BAR1, beat sayıları)** |
 | `tb/tb_fill_check.sv` | Buffer doldurma / sarma / taşma tespiti |
 | `tb/tb_aurora8b_check.sv` | Aurora 8b10b VIP: 125 MHz, link sırası, log, mesaj birleştirme, **HUZPAR cevabı** (720 beat istek → 1 µs sonra 8 beat cevap, huzme ID yansıtma, gclk, tlast/tkeep, diğer ID'lere cevap yok), reset kenarı |
 | `tb/tb_aurora_check.sv` | Aurora VIP (+ **CİT cevabı**: 0000E003 → 0000E004, 48 kelime, alan düzeni, 1 µs gecikme, tanımsız ID'ye cevap yok): 125 MHz, link sırası, UFC el sıkışması, RX boş, log içeriği, `reset_pb` ile yeniden link |
