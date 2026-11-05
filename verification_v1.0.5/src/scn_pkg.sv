@@ -148,6 +148,7 @@ package scn_pkg;
     // generator : senaryo dosyasini okur, scn_cmd uretip mailbox'a koyar
     // =================================================================
     class generator;
+        int max_dw = 32;   // v1.0.5: paket basina en fazla DWORD; daha buyuk mesajlar bolunur (0: bolme yok)
         mailbox #(scn_cmd) mbx;
         string             file_name;
 
@@ -223,11 +224,12 @@ package scn_pkg;
             endcase
         endtask
 
-        // TLP satiri:  ADRES [BAR<n>] [SPLIT<n>] MSGID LEN BYTE0 BYTE1 ...
-        // SPLIT<n> (istege bagli): mesaj (ID 4B + LEN 4B + veri) n DWORD'luk (n*4 bayt) paketlere bolunur;
-        //   her paket ayri bir TLP olur. ID+LEN basligi yalnizca ILK pakette bulunur, adres tum paketlerde
-        //   ayni, paketler art arda gonderilir, son paket kisa olabilir. ("SPLITn" gecerli hex degildir.)
+        // TLP satiri:  ADRES [BAR<n>] MSGID LEN BYTE0 BYTE1 ...
         // BAR alani istege bagli: yoksa BAR0. "BARn" gecerli bir hex olmadigi icin MSGID ile karismaz.
+        // v1.0.5: mesaj (ID 4B + LEN 4B + veri) max_dw DWORD'dan (varsayilan 32 = 128 bayt) BUYUKSE otomatik olarak
+        //   max_dw DWORD'luk paketlere bolunur; her paket ayri bir TLP'dir. ID+LEN basligi yalnizca ILK pakette
+        //   bulunur, adres tum paketlerde ayni, paketler art arda gonderilir. Kucuk mesajlar tek TLP'dir
+        //   (32 DWORD'e tamamlama/dolgu YOKTUR); son paket kisa olabilir.
         task parse_tlp(string toks[$], int line_no, bit [63:0] address);
             bit [63:0]       mid;
             longint unsigned dlen;
@@ -241,7 +243,6 @@ package scn_pkg;
             string           t1;
             tlp_item         tr;
             scn_cmd          cmd;
-            int              split_dw = 0;
             bit [7:0]        mbytes[];
 
             // ---- istege bagli BAR<n> alani (n = 0..6) ----
@@ -259,26 +260,11 @@ package scn_pkg;
                 end
             end
 
-            // ---- istege bagli SPLIT<n> alani (paket basina DWORD) ----
-            if (toks.size() > 1 && toks[1].len() >= 6) begin
-                t1 = toks[1].substr(0, 4);
-                if (t1 == "SPLIT" || t1 == "split" || t1 == "Split") begin
-                    longint unsigned sn;
-                    if (!parse_dec(toks[1].substr(5, toks[1].len() - 1), sn) || sn < 1 || sn > 1024) begin
-                        $error("[GEN] satir %0d: gecersiz SPLIT alani '%s' (SPLIT1..SPLIT1024), satir atlandi.",
-                               line_no, toks[1]);
-                        return;
-                    end
-                    split_dw = int'(sn);
-                    toks.delete(1);
-                end
-            end
-
             if (toks.size() < 3 || !parse_hex(toks[1], mid) || !parse_dec(toks[2], dlen)) begin
                 $error("[GEN] satir %0d: TLP satiri 'ADRES MSGID LEN DATA...' bicimde degil, atlandi.", line_no);
                 return;
             end
-            if ((mid >> 32) != 0 || dlen > ((split_dw > 0) ? 64'd1048576 : 64'd8192)) begin
+            if ((mid >> 32) != 0 || dlen > ((max_dw > 0) ? 64'd1048576 : 64'd8192)) begin
                 $error("[GEN] satir %0d: MSGID 32 bitten buyuk ya da LEN cok buyuk, atlandi.", line_no);
                 return;
             end
@@ -297,10 +283,10 @@ package scn_pkg;
                 return;
             end
 
-            // ---- SPLIT: mesaji n DWORD'luk paketlere bol, her biri ayri TLP ----
-            if (split_dw > 0) begin
+            // ---- otomatik bolme: mesaj max_dw DWORD'dan buyukse paketlere bol, her biri ayri TLP ----
+            if (max_dw > 0 && (8 + data_len) > max_dw * 4) begin
                 int total   = 8 + data_len;            // ID + LEN + veri
-                int chunk   = split_dw * 4;            // paket basina bayt
+                int chunk   = max_dw * 4;              // paket basina bayt
                 int npk     = (total + chunk - 1) / chunk;
                 mbytes = new[total];
                 for (int i = 0; i < 4; i++) mbytes[i]     = msg_id[8*i +: 8];
@@ -339,8 +325,8 @@ package scn_pkg;
                     cmd.tlp = tr;
                     mbx.put(cmd);
                 end
-                $display("[GEN] satir %0d: TLP (SPLIT%0d) -> Addr: %h | BAR%0d | MsgID: %h | Len: %0d | %0d paket (%0d bayt toplam)",
-                         line_no, split_dw, address, bar, msg_id, data_len, npk, total);
+                $display("[GEN] satir %0d: TLP (otomatik bolme, %0d DWORD) -> Addr: %h | BAR%0d | MsgID: %h | Len: %0d | %0d paket (%0d bayt toplam)",
+                         line_no, max_dw, address, bar, msg_id, data_len, npk, total);
                 mbytes.delete();
                 return;
             end

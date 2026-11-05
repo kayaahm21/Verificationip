@@ -34,6 +34,7 @@ module sim_model_cpu #(
     parameter int    ISR_ALL_BUFFERS  = 0,                 // 1: kesme vektoru ne olursa olsun 4 buffer'i da oku
                                                            // 0: yalnizca vektorde set olan bitlerin buffer'ini oku
     parameter string TRACE_FILE       = "rq_trace.txt",    // gelen tum TLP'lerin izi (+RQ_TRACE=)
+    parameter int    MAX_TLP_DWORDS   = 32,                // CPU->FPGA: paket basina en fazla DWORD; buyuk mesajlar otomatik bolunur (0: bolme yok)
     parameter int    ISR_LATENCY_NS   = 100,               // MSI'dan sonra ISR'nin baslamasi icin bekleme (ns)
     parameter bit [31:0] CFG_MSG_ID   = 32'h1DEA0001,      // buffer'i programlayan mesajin ID'si
     parameter int    CFG_BIG_ENDIAN   = 0,                 // konfigurasyon alanlari: 0 = little-endian
@@ -222,6 +223,7 @@ module sim_model_cpu #(
         beam = new(bif, beam_source, BEAM_PULSE_CLKS, bit'(BEAM_ACTIVE_HIGH != 0));
         drv  = new(cq_if, mbx, beam, cpu);
         gen  = new(mbx, file_name);
+        gen.max_dw = MAX_TLP_DWORDS;
 
         drv.reset();                 // reset + link up bekler
         fork drv.run(); join_none    // komutlari arka planda calistir

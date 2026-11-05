@@ -18,8 +18,8 @@ Mesaj verisi (index, boyut, tip) - hepsi little-endian:
                   (Bypass'ta katsayi YOK, LEN = 56)
 LEN = 56 + M*1920 (HO)  |  56 (Bypass)
 
-Mesaj PCIe'den SPLIT<n> ile n DWORD'luk (varsayilan 32 DWORD = 128 bayt) paketlere bolunerek gonderilir;
-ID+LEN basligi yalnizca ilk pakettedir, adres 0.
+Mesaj (ID+LEN+veri) 32 DWORD'dan (128 bayt) buyuk oldugu icin VIP'in senaryo ayristiricisi tarafindan OTOMATIK
+olarak 32 DWORD'luk paketlere bolunur (ID+LEN basligi yalnizca ilk pakette, adres 0, paketler art arda).
 
 Kullanim:
    python3 gen_shob_huzpar.py --bar 1 > shob1_satiri.txt           # HO, M=4, darbe=4, ornek=4
@@ -38,7 +38,6 @@ def le(v, n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bar", type=int, default=1, help="hedef BAR (SHOB-1: 1, SHOB-2: 2)")
-    ap.add_argument("--split", type=int, default=32, help="paket basina DWORD (0: bolme)")
     ap.add_argument("--mode", choices=["ho", "bypass"], default="ho", help="SHOB sinyal isleme durumu")
     ap.add_argument("--m", type=int, default=4, help="alma huzmesi sayisi (HO: 4..96, 4'er adim)")
     ap.add_argument("--pulses", type=int, default=4, help="darbe sayisi")
@@ -81,8 +80,7 @@ def main():
             data += le(rnd.randrange(-2048, 2048) & 0xFFFF, 2)   # int16 (little-endian)
         assert len(data) == 56 + a.m * 1920
 
-    split = ("SPLIT%d " % a.split) if a.split > 0 else ""
-    print("00000000 BAR%d %s0000E001 %d %s" % (a.bar, split, len(data), " ".join("%02X" % b for b in data)))
+    print("00000000 BAR%d 0000E001 %d %s" % (a.bar, len(data), " ".join("%02X" % b for b in data)))
 
 
 if __name__ == "__main__":

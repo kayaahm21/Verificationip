@@ -117,7 +117,7 @@ module tb_cq_check;
         #200;
 
         $display("---------------- SONUC ----------------");
-        chk(tlp_bytes.size() == 8, "8 TLP bekleniyordu (5 normal + 3 SPLIT paketi)");
+        chk(tlp_bytes.size() == 8, "8 TLP bekleniyordu (5 normal + 3 paket: otomatik bolme)");
 
         build_expected(32'h12340000, 32'h0000000A, d1, e);
         chk(diff_info(tlp_bytes[0], e) == "", {"TLP1: ", diff_info(tlp_bytes[0], e)});
@@ -138,7 +138,7 @@ module tb_cq_check;
         chk(diff_info(tlp_bytes[4], e) == "", {"TLP5 (bar5): ", diff_info(tlp_bytes[4], e)});
 
 
-        // v1.0.5: SPLIT32: 300 baytlik mesaj -> 3 paket (128 + 128 + 52 bayt), ID+LEN yalniz ilkinde, adres 0x4000 hep ayni, BAR1
+        // v1.0.5: otomatik bolme (32 DWORD): 300 baytlik mesaj -> 3 paket (128 + 128 + 52 bayt), ID+LEN yalniz ilkinde, adres 0x4000 hep ayni, BAR1
         begin : split_test
             bit [7:0] mb[$];
             bit [7:0] ex[$];
@@ -159,10 +159,10 @@ module tb_cq_check;
                 for (int i = 0; i < 4; i++) ex.push_back(dw2[8*i +: 8]);
                 for (int i = 0; i < 4; i++) ex.push_back((i == 2) ? 8'h01 : 8'h00);   // DW3: BAR ID = 1 (bayt 14)
                 for (int i = 0; i < lens[k]; i++) ex.push_back(mb[offs[k] + i]);
-                chk(diff_info(tlp_bytes[5 + k], ex) == "", $sformatf("SPLIT paket %0d: %s", k + 1, diff_info(tlp_bytes[5 + k], ex)));
+                chk(diff_info(tlp_bytes[5 + k], ex) == "", $sformatf("Bolme paket %0d: %s", k + 1, diff_info(tlp_bytes[5 + k], ex)));
             end
-            chk(mb.size() == 308, "SPLIT toplam 308 bayt (8 baslik + 300 veri)");
-            chk(tlp_beats[5] == 5 && tlp_beats[6] == 5 && tlp_beats[7] == 3, $sformatf("SPLIT beat sayilari %0d %0d %0d (beklenen 5 5 3)", tlp_beats[5], tlp_beats[6], tlp_beats[7]));
+            chk(mb.size() == 308, "Bolme toplam 308 bayt (8 baslik + 300 veri)");
+            chk(tlp_beats[5] == 5 && tlp_beats[6] == 5 && tlp_beats[7] == 3, $sformatf("Bolme beat sayilari %0d %0d %0d (beklenen 5 5 3)", tlp_beats[5], tlp_beats[6], tlp_beats[7]));
         end
 
         // beat sayilari: 32 B -> 1, 124 B -> 4, 24 B -> 1

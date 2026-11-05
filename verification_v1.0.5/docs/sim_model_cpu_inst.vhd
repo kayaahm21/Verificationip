@@ -17,6 +17,7 @@ begin
     --     BEAM_SOURCE     => "SCRIPT",           -- "SCRIPT": HB'yi VIP uretir, "DESIGN": gercek modul uretir
     --     BEAM_PULSE_CLKS => 1,                  -- uretilen HB darbesinin genisligi (clock)
     --     OUT_PREFIX      => "cpu_out",          -- v1.0.4: cpu_out_sifpga.txt, _shob1, _shob2, _iub dosyalari
+    --     MAX_TLP_DWORDS  => 32,                 -- v1.0.5: paket basina en fazla DWORD (buyuk mesajlar otomatik bolunur, 0: bolme yok)
     --     TRACE_FILE      => "rq_trace.txt",     -- v1.0.3: gelen tum TLP'lerin izi
     --     ISR_LATENCY_NS  => 100                 -- v1.0.3: MSI'dan sonra ISR gecikmesi
     -- )
