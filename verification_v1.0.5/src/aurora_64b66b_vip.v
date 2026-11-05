@@ -44,7 +44,11 @@ module aurora_64b66b_vip #(
     parameter RESP_GAP_CLKS    = 1,        // cevap kelimeleri arasi bos clock sayisi
     parameter FIELD_BIG_ENDIAN = 0,        // cevaptaki uint16/uint32 alanlari: 0 = little-endian
     parameter WORD_BIG_ENDIAN  = 0,        // 4 baytlik kelime paketleme: 0 = ilk bayt tdata[7:0]
-    parameter UPTIME_OFFSET_S  = 273600    // cihaz saati baslangici (saniye); + simulasyon suresi
+    parameter UPTIME_OFFSET_S  = 273600,   // cihaz saati baslangici (saniye); + simulasyon suresi
+    // ---- v1.0.5: kullanici verisi (HUZPAR ve KATSAYILAR, ID 0000E001) gozlemi ----
+    parameter MAX_MSG_BYTES    = 262144,   // en buyuk mesaj (ID+LEN+veri) bayt sayisi (HO, M=96 icin 184384)
+    parameter LOG_RAW_BEATS    = 1,        // 1: her beat icin USER_TX satiri yaz (buyuk mesajlarda 0 yapilabilir)
+    parameter LOG_DATA_BYTES   = 64        // obs'taki MSG satirina yazilan en fazla veri bayti
 )(
     // ---- TX AXI4-S (USER_DATA_S_AXIS_TX) ----
     (* X_INTERFACE_INFO = "xilinx.com:interface:axis:1.0 USER_DATA_S_AXIS_TX TDATA" *)  input  wire [191:0] s_axi_tx_tdata,
@@ -229,7 +233,7 @@ module aurora_64b66b_vip #(
         end
 
         // kullanici verisi: yalnizca alt 128 bit anlamli
-        if (s_axi_tx_tvalid && s_axi_tx_tready && fd != 0) begin
+        if (s_axi_tx_tvalid && s_axi_tx_tready && fd != 0 && LOG_RAW_BEATS != 0) begin
             $fdisplay(fd, "%0d USER_TX lo128=%h keep=%h last=%0d", $time,
                       s_axi_tx_tdata[127:0], s_axi_tx_tkeep, s_axi_tx_tlast);
             $fflush(fd);
@@ -415,6 +419,202 @@ module aurora_64b66b_vip #(
             end
             default: ;
         endcase
+    end
+
+
+    // =================================================================
+    // v1.0.5: Kullanici verisi mesaj birlestirme + HUZPAR ve KATSAYILAR (ID 0000E001) cozumu (gozlemci)
+    //
+    // Mesaj bicimi: ID (4 B) + LEN (4 B, yalnizca veri) + veri. Her beat'te yalnizca ALT 128 bit (16 bayt)
+    // gecerlidir (tkeep[15:0]); ust 64 bit icin tkeep=0 beklenir. Beat'ler tlast'a kadar toplanir.
+    // Mesaj ID 0000E001 ise alanlara ayrilip aurora_huzpar_<UNIT_NAME>.txt dosyasina, katsayilar
+    // aurora_huzpar_katsayi_<UNIT_NAME>.txt dosyasina yazilir. Her mesaj icin obs dosyasina da MSG satiri yazilir.
+    // Cevap uretilmez.
+    //
+    // Veri alanlari (index, boyut, tip) - little-endian:
+    //    0 4 uint32 huzme ID | 4 2 uint16 sinyal isleme durumu (0 Bypass, 1 HO) | 6 2 uint16 alma huzmesi sayisi
+    //    (HO: 4..96 4'er adim, Bypass: 960) | 8 4 darbe sayisi | 12 4 darbedeki ornek sayisi (4'un kati)
+    //    16/20/24/28 4 x uint32 GAC kullanim maskeleri (bit 30,31 reserved) | 32 1 kart kullanim durumu
+    //    (bit0 HO, bit1-3 HI-1..3) | 33 1 test modu (0 HO, 1 HI) | 34 22 reserved
+    //    56'dan: katsayilar = huzme x 120 GAC x 4 kanal x (I,Q) x int16 (M x 1920 bayt); Bypass'ta yok.
+    //    LEN = 56 + M*1920 (HO) | 56 (Bypass)
+    // =================================================================
+    localparam [31:0] ID_HUZPAR_KATSAYI = 32'h0000E001;
+
+    reg [7:0] ub [0:MAX_MSG_BYTES-1];
+    integer   ucount = 0;
+    integer   ui, uk;
+    reg [31:0] u_id, u_len;
+    reg        u_hikeep = 1'b0;           // mesaj icinde ust 64 bit tkeep=1 goruldu mu
+
+    integer fh = 0, fk = 0;
+    reg [8*72-1:0] hname, kname;
+    initial begin
+        if (LOG_ENABLE != 0) begin
+            $sformat(hname, "aurora_huzpar_%0s.txt", UNIT_NAME);
+            $sformat(kname, "aurora_huzpar_katsayi_%0s.txt", UNIT_NAME);
+            fh = $fopen(hname, "w");
+            fk = $fopen(kname, "w");
+            if (fh != 0) begin
+                $fdisplay(fh, "# aurora_64b66b_vip SHOB HUZPAR ve KATSAYILAR (0000E001) gozlem logu (birim=%0s). Zamanlar ns.", UNIT_NAME);
+                $fflush(fh);
+            end
+            if (fk != 0) begin
+                $fdisplay(fk, "# katsayilar (birim=%0s): her satir bir (huzme, GAC); kanal basina I ve Q (int16)", UNIT_NAME);
+                $fflush(fk);
+            end
+        end
+    end
+
+    // yardimci: ub[]'den little-endian okuma (mutlak bayt indeksi)
+    function [15:0] u16(input integer o);
+        u16 = {ub[o+1], ub[o]};
+    endfunction
+    function [31:0] u32(input integer o);
+        u32 = {ub[o+3], ub[o+2], ub[o+1], ub[o]};
+    endfunction
+
+    reg [31:0] h_id, h_darbe, h_ornek, h_m0, h_m1, h_m2, h_m3;
+    reg [15:0] h_durum, h_nbeam;
+    reg [7:0]  h_kart, h_test;
+    integer    h_exp, h_ncoef, h_hz, h_gac, h_k, h_o, h_avail, h_bad;
+    reg signed [15:0] h_i, h_q;
+    reg [8*10-1:0] h_dtxt;
+
+    task huzpar_decode;
+        begin
+            if (ucount < 8 + 56) begin
+                if (fh != 0) begin
+                    $fdisplay(fh, "%0d HUZPAR_UYARI mesaj cok kisa: %0d bayt (en az 64 = ID+LEN+56 baslik gerekir)", $time, ucount);
+                    $fflush(fh);
+                end
+            end else begin
+                h_id    = u32(8);
+                h_durum = u16(12);
+                h_nbeam = u16(14);
+                h_darbe = u32(16);
+                h_ornek = u32(20);
+                h_m0 = u32(24); h_m1 = u32(28); h_m2 = u32(32); h_m3 = u32(36);
+                h_kart  = ub[40];
+                h_test  = ub[41];
+                if      (h_durum == 16'd0) h_dtxt = "Bypass";
+                else if (h_durum == 16'd1) h_dtxt = "HO";
+                else                       h_dtxt = "GECERSIZ";
+                h_exp   = (h_durum == 16'd1) ? 56 + h_nbeam * 1920 : 56;
+                h_ncoef = (ucount - 64) / 2;
+
+                if (fh != 0) begin
+                    $fwrite(fh, "%0d HUZPAR id=%h len=%0d huzme_id=%h durum=%0s alma_huzme=%0d darbe=%0d ornek=%0d ",
+                            $time, u_id, u_len, h_id, h_dtxt, h_nbeam, h_darbe, h_ornek);
+                    $fwrite(fh, "gac_maske=%h,%h,%h,%h kart=%h test_modu=%0d katsayi_int16=%0d reserved=",
+                            h_m0, h_m1, h_m2, h_m3, h_kart, h_test, h_ncoef);
+                    for (uk = 42; uk < 64; uk = uk + 1) begin
+                        if (uk > 42) $fwrite(fh, " ");
+                        $fwrite(fh, "%h", ub[8 + uk - 8 + 0]);   // ub[8+34 ...] = veri indexi 34..55
+                    end
+                    $fwrite(fh, "\n");
+
+                    // ---- dogrulamalar ----
+                    if (h_durum != 16'd0 && h_durum != 16'd1)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI sinyal isleme durumu gecersiz: %0d (0 Bypass, 1 HO)", $time, h_durum);
+                    if (h_durum == 16'd1 && !(h_nbeam >= 4 && h_nbeam <= 96 && (h_nbeam % 4) == 0))
+                        $fdisplay(fh, "%0d HUZPAR_UYARI HO'da alma huzmesi sayisi 4..96 (4'er adim) olmali: %0d", $time, h_nbeam);
+                    if (h_durum == 16'd0 && h_nbeam != 16'd960)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI Bypass'ta alma huzmesi sayisi 960 olmali: %0d", $time, h_nbeam);
+                    if (u_len != h_exp)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI len=%0d, beklenen %0d (%0s)", $time, u_len, h_exp,
+                                  (h_durum == 16'd1) ? "56 + M*1920" : "Bypass: 56, katsayi yok");
+                    if (h_durum == 16'd0 && u_len > 56)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI Bypass'ta katsayi gonderilmemeli (katsayi boyu 0)", $time);
+                    if (h_darbe == 0)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI darbe sayisi 0 (>0 olmali)", $time);
+                    if (h_ornek == 0 || (h_ornek % 4) != 0)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI darbedeki ornek sayisi >0 ve 4'un kati olmali: %0d", $time, h_ornek);
+                    if (h_m0[31:30] != 0 || h_m1[31:30] != 0 || h_m2[31:30] != 0 || h_m3[31:30] != 0)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI GAC kullanim maskelerinin 30. ve 31. bitleri reserved (0 olmali)", $time);
+                    if (h_test == 8'd1 && (h_kart & 8'h0E) != 0)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI test modu 1 iken HI kullanim durumlari 0 olmali: kart=%h", $time, h_kart);
+                    h_bad = 0;
+                    for (uk = 34; uk < 56; uk = uk + 1) if (ub[8 + uk] !== 8'h00) h_bad = 1;
+                    if (h_bad) $fdisplay(fh, "%0d HUZPAR_UYARI reserved alani sifir degil", $time);
+                    if (u_hikeep)
+                        $fdisplay(fh, "%0d HUZPAR_UYARI ust 64 bit icin tkeep=1 goruldu (yalniz alt 128 bit kullanilir), yok sayildi", $time);
+                    $fflush(fh);
+                end
+
+                // ---- katsayilar: huzme -> GAC -> kanal(1..4) -> I, Q (int16) ----
+                if (h_durum == 16'd1 && fk != 0) begin
+                    h_avail = ucount - 64;                      // katsayi icin gelen bayt
+                    $fdisplay(fk, "%0d HUZPAR huzme_id=%h M=%0d katsayi_bayt=%0d", $time, h_id, h_nbeam, h_avail);
+                    for (h_hz = 0; h_hz < h_nbeam; h_hz = h_hz + 1)
+                        for (h_gac = 0; h_gac < 120; h_gac = h_gac + 1) begin
+                            h_o = 8 + 56 + (h_hz * 120 + h_gac) * 16;
+                            if (h_o - 8 - 56 + 16 <= h_avail) begin
+                                $fwrite(fk, "huzme=%0d gac=%0d", h_hz + 1, h_gac + 1);
+                                for (h_k = 0; h_k < 4; h_k = h_k + 1) begin
+                                    h_i = u16(h_o + 4 * h_k);
+                                    h_q = u16(h_o + 4 * h_k + 2);
+                                    $fwrite(fk, " k%0d I=%0d Q=%0d", h_k + 1, h_i, h_q);
+                                end
+                                $fwrite(fk, "\n");
+                            end else if (h_o - 8 - 56 < h_avail + 16 && fh != 0 && h_gac == 0 && h_hz == 0) begin
+                                $fdisplay(fh, "%0d HUZPAR_UYARI katsayilar eksik geldi", $time);
+                            end
+                        end
+                    $fflush(fk);
+                end
+            end
+        end
+    endtask
+
+    task user_msg_done;
+        begin
+            if (ucount < 8) begin
+                if (fd != 0) begin
+                    $fdisplay(fd, "%0d MSG_KISA bayt=%0d (en az 8 bayt: ID+LEN gerekir), yok sayildi", $time, ucount);
+                    $fflush(fd);
+                end
+            end else begin
+                u_id  = u32(0);
+                u_len = u32(4);
+                if (fd != 0) begin
+                    $fwrite(fd, "%0d MSG id=%h len=%0d data=", $time, u_id, u_len);
+                    for (ui = 8; ui < ucount && ui < MAX_MSG_BYTES && (ui - 8) < LOG_DATA_BYTES; ui = ui + 1) begin
+                        if (ui > 8) $fwrite(fd, " ");
+                        $fwrite(fd, "%h", ub[ui]);
+                    end
+                    if ((ucount - 8) > LOG_DATA_BYTES) $fwrite(fd, " ... (toplam %0d veri bayti)", ucount - 8);
+                    $fwrite(fd, "\n");
+                    if (u_len != ucount - 8)
+                        $fdisplay(fd, "%0d MSG_UYARI len=%0d ama %0d veri bayti geldi", $time, u_len, ucount - 8);
+                    if (ucount > MAX_MSG_BYTES)
+                        $fdisplay(fd, "%0d MSG_UYARI mesaj %0d bayt, tampon %0d bayt: fazlasi saklanmadi", $time, ucount, MAX_MSG_BYTES);
+                    $fflush(fd);
+                end
+                if (u_id == ID_HUZPAR_KATSAYI) begin
+                    if (fd != 0) begin
+                        $fdisplay(fd, "%0d HUZPAR_MSG ayrintilar: aurora_huzpar_%0s.txt / aurora_huzpar_katsayi_%0s.txt", $time, UNIT_NAME, UNIT_NAME);
+                        $fflush(fd);
+                    end
+                    // veri indeksi 0 = ub[8]; huzpar_decode ub[] mutlak indeks kullanir (8 + veri indeksi)
+                    huzpar_decode;
+                end
+            end
+            ucount   = 0;
+            u_hikeep = 1'b0;
+        end
+    endtask
+
+    always @(posedge clk) begin
+        if (s_axi_tx_tvalid && s_axi_tx_tready) begin
+            for (ui = 0; ui < 16; ui = ui + 1)
+                if (s_axi_tx_tkeep[ui]) begin
+                    if (ucount < MAX_MSG_BYTES) ub[ucount] = s_axi_tx_tdata[8*ui +: 8];
+                    ucount = ucount + 1;
+                end
+            if (s_axi_tx_tkeep[23:16] != 0) u_hikeep = 1'b1;
+            if (s_axi_tx_tlast) user_msg_done;
+        end
     end
 
     // ---- link durumu degisimleri ----

@@ -11,6 +11,8 @@
 //   A5  kullanici verisi her zaman kabul edilir; log'a alt 128 bit yazilir
 //   C1  0000E003 (len=0) istegine 1 us sonra 0000E004 (len=184) cevabi: 48 UFC kelimesi, alan duzeni
 //   C2  diger mesaj ID'lerine cevap verilmez
+//   D1  SHOB HUZPAR ve KATSAYILAR (0000E001): 16 baytlik beat'ler (alt 128 bit, ust 64 bit tkeep=0) birlestirilir,
+//       alanlar aurora_huzpar_tb.txt'ye, katsayilar aurora_huzpar_katsayi_tb.txt'ye yazilir; hatali mesaj uyari uretir
 //   A6  reset_pb ile link yeniden kurulur
 //   A7  log dosyasi beklenen satirlari icerir
 // =====================================================================
@@ -106,6 +108,45 @@ module tb_aurora_check;
     function [31:0] r32(input integer i);
         r32 = {rbyte(i+3), rbyte(i+2), rbyte(i+1), rbyte(i)};
     endfunction
+
+
+    // ---- v1.0.5: HUZPAR mesaj ureticisi (16 baytlik beat'ler) ----
+    reg [7:0] tb_m [0:16383];
+    integer   tb_n = 0;
+    task put8(input [7:0] v);   begin tb_m[tb_n] = v; tb_n = tb_n + 1; end endtask
+    task put16(input [15:0] v); begin put8(v[7:0]); put8(v[15:8]); end endtask
+    task put32(input [31:0] v); begin put16(v[15:0]); put16(v[31:16]); end endtask
+    // tb_m[] icindeki mesaji 16 baytlik beat'lerle gonder (alt 128 bit, tkeep[15:0]; ust 64 bit tkeep=0)
+    task send_msg16;
+        integer i, j, rem;
+        reg [127:0] d;
+        reg [23:0]  kp;
+        begin
+            for (i = 0; i < tb_n; i = i + 16) begin
+                rem = tb_n - i;
+                d = 128'd0; kp = 24'd0;
+                for (j = 0; j < 16; j = j + 1)
+                    if (j < rem) begin d[8*j +: 8] = tb_m[i + j]; kp[j] = 1'b1; end
+                @(negedge user_clk);
+                tx_tdata <= {64'd0, d}; tx_tkeep <= kp; tx_tlast <= (rem <= 16); tx_tvalid <= 1'b1;
+            end
+            @(negedge user_clk);
+            tx_tvalid <= 1'b0; tx_tlast <= 1'b0; tx_tkeep <= 24'd0;
+            repeat (3) @(negedge user_clk);
+            tb_n = 0;
+        end
+    endtask
+    // 56 baytlik HUZPAR basligi (ID+LEN dahil degil): huzme id, durum, M, darbe, ornek, 4 maske, kart, test, 22 reserved
+    task put_huzpar_header(input [31:0] hid, input [15:0] durum, input [15:0] nb, input [31:0] darbe, input [31:0] ornek,
+                           input [31:0] m0, input [31:0] m1, input [31:0] m2, input [31:0] m3, input [7:0] kart, input [7:0] test);
+        integer r;
+        begin
+            put32(hid); put16(durum); put16(nb); put32(darbe); put32(ornek);
+            put32(m0); put32(m1); put32(m2); put32(m3);
+            put8(kart); put8(test);
+            for (r = 0; r < 22; r = r + 1) put8(8'h00);
+        end
+    endtask
 
     // ---- A1: saat periyodu ----
     realtime t0, t1;
@@ -204,6 +245,60 @@ module tb_aurora_check;
         repeat (400) @(negedge user_clk);
         chk(rx_n == 0, "C2 tanimsiz mesaj ID'sine cevap yok");
 
+
+        // D1: SHOB HUZPAR ve KATSAYILAR. (1) gecerli HO mesaji, M=4, darbe=4, ornek=4; katsayi I = h*1000+g*10+k, Q = -I
+        begin : d1_test
+            integer h, g, k;
+            reg signed [15:0] cv;
+            put32(32'h0000E001); put32(32'd7736);
+            put_huzpar_header(32'h0000AB12, 16'd1, 16'd4, 32'd4, 32'd4, 32'h3FFFFFFF, 32'h00000001, 32'h20000000, 32'h15555555, 8'h01, 8'h00);
+            for (h = 1; h <= 4; h = h + 1)
+                for (g = 1; g <= 120; g = g + 1)
+                    for (k = 1; k <= 4; k = k + 1) begin
+                        cv = h * 1000 + g * 10 + k;
+                        put16(cv);          // I
+                        put16(-cv);         // Q
+                    end
+            chk(tb_n == 7744, "D1 mesaj 7744 bayt (8 baslik + 56 + 4x1920)");
+            send_msg16;
+        end
+        // (2) gecerli Bypass: LEN=56, katsayi yok, alma huzmesi sayisi 960
+        put32(32'h0000E001); put32(32'd56);
+        put_huzpar_header(32'h0000CD34, 16'd0, 16'd960, 32'd4, 32'd4, 32'h3FFFFFFF, 32'h3FFFFFFF, 32'h3FFFFFFF, 32'h3FFFFFFF, 8'h01, 8'h00);
+        send_msg16;
+        // (3) hatali HO: M=6 (4'un kati degil), LEN=56 (katsayi yok), darbe=0
+        put32(32'h0000E001); put32(32'd56);
+        put_huzpar_header(32'h0000EF56, 16'd1, 16'd6, 32'd0, 32'd4, 32'h3FFFFFFF, 32'h0, 32'h0, 32'h0, 8'h01, 8'h00);
+        send_msg16;
+        // (4) baska ID (0000E002): HUZPAR dosyasina girmez, yalniz obs'ta MSG
+        put32(32'h0000E002); put32(32'd8); put32(32'h11111111); put32(32'h22222222);
+        send_msg16;
+        #200;
+
+        begin : d1_check
+            integer nh, nu, nk;
+            nh = count_in("aurora_huzpar_tb.txt", "HUZPAR id=");
+            nu = count_in("aurora_huzpar_tb.txt", "HUZPAR_UYARI");
+            nk = count_in("aurora_huzpar_katsayi_tb.txt", "huzme=");
+            chk(nh == 3, "D1 huzpar dosyasinda 3 mesaj (E002 girmez)");
+            chk(count_in("aurora_huzpar_tb.txt", "HUZPAR id=0000e001 len=7736 huzme_id=0000ab12 durum=HO alma_huzme=4 darbe=4 ornek=4 gac_maske=3fffffff,00000001,20000000,15555555 kart=01 test_modu=0 katsayi_int16=3840") == 1,
+                "D1 HO mesaji: alanlar dogru cozuldu");
+            chk(count_in("aurora_huzpar_tb.txt", "HUZPAR id=0000e001 len=56 huzme_id=0000cd34 durum=Bypass alma_huzme=960 darbe=4 ornek=4") == 1,
+                "D1 Bypass mesaji: alanlar dogru");
+            chk(count_in("aurora_huzpar_tb.txt", "huzme_id=0000ef56 durum=HO alma_huzme=6 darbe=0") == 1, "D1 hatali mesaj da cozuldu");
+            chk(nu == 3, "D1 yalniz hatali mesaj uyari uretti (3 uyari)");
+            chk(count_in("aurora_huzpar_tb.txt", "HO'da alma huzmesi sayisi 4..96 (4'er adim) olmali: 6") == 1, "D1 uyari: M=6 gecersiz");
+            chk(count_in("aurora_huzpar_tb.txt", "len=56, beklenen 11576") == 1, "D1 uyari: LEN beklenenden farkli (11576)");
+            chk(count_in("aurora_huzpar_tb.txt", "darbe sayisi 0") == 1, "D1 uyari: darbe sayisi 0");
+            chk(nk == 480, "D1 katsayi dosyasi 480 satir (4 huzme x 120 GAC)");
+            chk(count_in("aurora_huzpar_katsayi_tb.txt", "huzme=1 gac=1 k1 I=1011 Q=-1011") == 1, "D1 katsayi: huzme1 gac1 k1");
+            chk(count_in("aurora_huzpar_katsayi_tb.txt", "huzme=2 gac=57 k1 I=2571 Q=-2571 k2 I=2572 Q=-2572 k3 I=2573 Q=-2573 k4 I=2574 Q=-2574") == 1, "D1 katsayi: huzme2 gac57, 4 kanal (negatif Q)");
+            chk(count_in("aurora_huzpar_katsayi_tb.txt", "huzme=4 gac=120 k1 I=5201 Q=-5201 k2 I=5202 Q=-5202 k3 I=5203 Q=-5203 k4 I=5204 Q=-5204") == 1, "D1 katsayi: huzme4 gac120 (son satir)");
+            chk(count_in("aurora_obs_tb.txt", "MSG id=0000e001 len=7736 data=") == 1 &&
+                count_in("aurora_obs_tb.txt", "... (toplam 7736 veri bayti)") == 1, "D1 obs: MSG satiri (veri kisaltildi)");
+            chk(count_in("aurora_obs_tb.txt", "MSG id=0000e002 len=8 data=11 11 11 11 22 22 22 22") == 1, "D1 obs: 0000E002 yalniz MSG");
+        end
+
         // A6: reset_pb link'i dusurur, birakinca yeniden kurar
         reset_pb <= 1'b1;
         repeat (3) @(posedge user_clk);
@@ -250,6 +345,25 @@ module tb_aurora_check;
             chk(got_msg && got_plan && got_done, "A7 log: UFC_MSG, UFC_RESP planlandi/bitti");
         end
     endtask
+
+
+    // dosyada alt metin iceren satir sayisi
+    function automatic integer count_in(input string fname, input string sub);
+        integer fd, code, n;
+        string  line;
+        begin
+            n = 0;
+            fd = $fopen(fname, "r");
+            while (fd != 0 && !$feof(fd)) begin
+                line = "";
+                code = $fgets(line, fd);
+                if (code == 0) break;
+                if (has(line, sub)) n = n + 1;
+            end
+            if (fd != 0) $fclose(fd);
+            count_in = n;
+        end
+    endfunction
 
     function automatic bit has(string s, string sub);
         for (int i = 0; i + sub.len() <= s.len(); i++)

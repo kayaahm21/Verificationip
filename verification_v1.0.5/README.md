@@ -127,7 +127,33 @@ huzme ID (4), sinyal işleme durumu (2; 0 Bypass, 1 HO), alma huzmesi sayısı (
 - Örnek senaryo: `examples/input_shob_huzpar.txt` (HO, M=4, darbe=4, örnek=4; LEN=7736 → 61 paket; SHOB-1 ve SHOB-2).
 - Üretici: `tools/gen_shob_huzpar.py` (`--bar`, `--mode ho|bypass`, `--m`, `--pulses`, `--samples`, `--huzme-id`, `--gac-masks`,
   `--card`, `--test-mode`, `--split`). Katsayılar rastgele int16 (sabit tohum).
-- SHOB VIP bu mesajı şimdilik yalnızca **gözlemler** (`USER_TX` ham beat satırları); ayrıştırıp ayrı dosyaya yazma sıradaki adım.
+- Katsayı sırası (ICD): **Huzme → GAÇ (1..120) → Kanal (1..4) → I, Q**, hepsi `int16`, 56. bayttan başlar.
+- SHOB VIP bu mesajı **gözlemler** (cevap üretmez); ayrıntılar aşağıdaki "SHOB HUZPAR gözlemi" bölümünde.
+
+
+### SHOB HUZPAR gözlemi (v1.0.5)
+
+`s_axi_tx_*` (192 bit) üzerinden gelen kullanıcı verisi mesaj olarak birleştirilir: her beat'te yalnızca **alt 128 bit**
+(`tkeep[15:0]`, 16 bayt) geçerlidir, **üst 64 bit için `tkeep=0`** beklenir (aksi halde uyarı). Beat'ler `tlast`'a kadar toplanır;
+biçim `ID (4 B) + LEN (4 B, yalnızca veri) + veri`. Her mesaj için obs dosyasına `MSG id=… len=… data=…` satırı yazılır.
+ID **`0000E001`** ise ayrıca (birim adı = `UNIT_NAME`, ör. `shob_1`):
+
+| Dosya | İçerik |
+|---|---|
+| `aurora_huzpar_<UNIT_NAME>.txt` | Mesaj başına bir satır: `huzme_id`, `durum` (Bypass/HO), `alma_huzme`, `darbe`, `ornek`, `gac_maske` (4 × hex), `kart`, `test_modu`, `katsayi_int16`, `reserved`; altında doğrulama uyarıları |
+| `aurora_huzpar_katsayi_<UNIT_NAME>.txt` | HO'da (huzme, GAÇ) başına bir satır: `huzme=1 gac=1 k1 I=… Q=… k2 I=… Q=… k3 … k4 …` (işaretli `int16`) |
+
+Örnek (`aurora_huzpar_shob_1.txt`):
+```
+14084 HUZPAR id=0000e001 len=7736 huzme_id=0000ab12 durum=HO alma_huzme=4 darbe=4 ornek=4 gac_maske=3fffffff,00000001,20000000,15555555 kart=01 test_modu=0 katsayi_int16=3840 reserved=00 00 ... 00
+```
+
+**Doğrulamalar (`HUZPAR_UYARI`):** `LEN` ≠ `56 + M×1920` (Bypass'ta ≠ 56); durum 0/1 değil; HO'da alma huzmesi 4..96 (4'er adım) değil, Bypass'ta 960 değil;
+Bypass'ta katsayı gelmesi; darbe sayısı 0; örnek sayısı 0 ya da 4'ün katı değil; GAÇ maskelerinde bit 30/31 set; test modu 1 iken HI kullanımı (kart bit1–3) set;
+reserved alanı sıfır değil; üst 64 bit `tkeep=1`; mesaj 64 bayttan kısa; katsayılar eksik.
+
+**Parametreler:** `MAX_MSG_BYTES` (262144; HO M=96 için 184384 bayt gerekir), `LOG_RAW_BEATS` (1; büyük mesajda `USER_TX` satırlarını kapatmak için 0),
+`LOG_DATA_BYTES` (64; obs'taki `MSG` satırına yazılan en fazla veri baytı).
 
 
 ### `sim_model_cpu` parametreleri
@@ -257,7 +283,7 @@ verilmesi; BD'deki wrapper'da `iub_user_data_m_axis_rx_tready` girişi görünse
 | `tb/tb_cq_check.sv` | CPU→FPGA TLP baytları, tkeep/tuser, HB/bekleme zamanlaması, **BAR ID (`BAR2`, `bar5`, varsayılan BAR0)**, **`SPLIT32` (300 B mesaj → 128+128+52 B paketler, başlık yalnız ilkte, BAR1, beat sayıları)** |
 | `tb/tb_fill_check.sv` | Buffer doldurma / sarma / taşma tespiti |
 | `tb/tb_aurora8b_check.sv` | Aurora 8b10b VIP: 125 MHz, link sırası, log, mesaj birleştirme, **HUZPAR cevabı** (720 beat istek → 1 µs sonra 8 beat cevap, huzme ID yansıtma, gclk, tlast/tkeep, diğer ID'lere cevap yok), reset kenarı |
-| `tb/tb_aurora_check.sv` | Aurora VIP (+ **CİT cevabı**: 0000E003 → 0000E004, 48 kelime, alan düzeni, 1 µs gecikme, tanımsız ID'ye cevap yok): 125 MHz, link sırası, UFC el sıkışması, RX boş, log içeriği, `reset_pb` ile yeniden link |
+| `tb/tb_aurora_check.sv` | Aurora VIP (+ **SHOB HUZPAR gözlemi**: 7744 bayt HO mesajı, Bypass, hatalı mesaj uyarıları, 480 satır katsayı, diğer ID'ler; + **CİT cevabı**: 0000E003 → 0000E004, 48 kelime, alan düzeni, 1 µs gecikme, tanımsız ID'ye cevap yok): 125 MHz, link sırası, UFC el sıkışması, RX boş, log içeriği, `reset_pb` ile yeniden link |
 
 ## Test durumu (dürüst not)
 
