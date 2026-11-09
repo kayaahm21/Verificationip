@@ -166,6 +166,7 @@ package scn_pkg;
             string toks[$];
             scn_cmd end_cmd;
 
+            $display("[GEN] scn_pkg: otomatik bolme surumu (v1.0.5, max_dw=%0d DWORD/paket)", max_dw);   // hangi dosyanin derlendigini gosterir
             fd = $fopen(file_name, "r");
             if (fd == 0) $fatal(1, "[GEN-FATAL] Senaryo dosyasi bulunamadi: %s", file_name);
 
