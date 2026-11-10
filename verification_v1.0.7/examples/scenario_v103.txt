@@ -1,0 +1,10 @@
+# =====================================================================
+# v1.0.3 ornek senaryosu: islemci modelinin circular buffer'ini programlar.
+#
+# 1DEA0001 mesajinin verisi (hepsi LITTLE-ENDIAN, 8'er bayt):
+#   [0..7]   buffer baslangic adresi   : 0x1000
+#   [8..15]  buffer boyutu (bayt)      : 0x40 (64)
+#   [16..23] yazma pointer adresi      : 0x2000
+#   [24..31] (SHOB/IUB vb. - simdilik yok sayilir)
+# =====================================================================
+0000000000000000 1DEA0001 32  00 10 00 00 00 00 00 00  40 00 00 00 00 00 00 00  00 20 00 00 00 00 00 00  AA BB CC DD EE FF 11 22

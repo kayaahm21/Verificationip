@@ -1,0 +1,26 @@
+# =====================================================================
+# Ornek senaryo dosyasi (v1.0.2)
+#
+#   ADRES  MSGID  LEN  BYTE0 BYTE1 ...   -> TLP (ADRES: hex, MSGID: hex, LEN: onluk bayt sayisi, 4'un kati)
+#   99999999                              -> huzme basini bekle
+#   88888888 <ns>                         -> <ns> nanosaniye bekle
+#   77777777 <ns>                         -> <ns> sonra huzme basi uret (bloklamaz)
+#   '#' veya '//' ile baslayan kisimlar yorumdur.
+# =====================================================================
+
+# 1000 ns sonra bir huzme basi uret (arka planda), sonra onu bekle
+77777777 1000
+99999999
+
+# huzme basindan hemen sonra iki mesaj
+0000000012340000 0000000A 8 11 22 33 44 55 66 77 88
+0000000012340040 0000000B 4 AA BB CC DD
+
+# 500 ns bekle, ardindan bir mesaj daha
+88888888 500
+0000000012340080 0000000C 4 01 02 03 04
+
+# ikinci huzme: 2000 ns sonra uret, bekle, mesaj gonder
+77777777 2000
+99999999
+00000000123400C0 0000000D 8 DE AD BE EF CA FE BA BE
