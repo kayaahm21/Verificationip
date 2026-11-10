@@ -13,6 +13,14 @@
 --     degiskenleri) gelir, bu yuzden sim_model_cpu (senaryo suren CPU VIP) AYNI simulasyonda bulunmali
 -----------------------------------------------------------------------
 
+-- ---- architecture bildirim bolumune eklenecek (RSI1/2/3 icin ortak kukla sinyaller; her RSI icin ayri da olabilir) ----
+-- signal rsi_cq_tdata_dummy  : std_logic_vector(255 downto 0);
+-- signal rsi_cq_tkeep_dummy  : std_logic_vector(7 downto 0);     -- CQ_KEEP_WIDTH ile ayni (varsayilan 8)
+-- signal rsi_cq_tuser_dummy  : std_logic_vector(87 downto 0);
+-- signal rsi_cq_tlast_dummy  : std_logic;
+-- signal rsi_cq_tvalid_dummy : std_logic;
+-- ISTEGE BAGLI: cfg_interrupt_msi_fail ve huzme_basi_gen de tek bitlik oldugundan 'open' birakilabilir.
+
 -- ---- architecture govdesinde (RSI1 icin; RSI2/RSI3 icin RSI_ID ve sinyal adlarini degistirin) ----
 gen_sim_model_rsi1: if (SIM_MODE = TRUE) generate
 begin
@@ -36,12 +44,14 @@ begin
         s_axis_rq_tuser         => <rsi1_s_axis_rq_tuser>,
         s_axis_rq_tvalid        => <rsi1_s_axis_rq_tvalid>,
 
-        m_axis_cq_tdata         => open,
-        m_axis_cq_tkeep         => open,
-        m_axis_cq_tlast         => open,
+        -- DIKKAT: karisik dilde (VHDL -> Verilog) vektor cikislari 'open' birakilamaz (xsim: size mismatch).
+        -- Asagidaki kukla sinyalleri architecture bildirim bolumunde tanimlayin.
+        m_axis_cq_tdata         => rsi_cq_tdata_dummy,
+        m_axis_cq_tkeep         => rsi_cq_tkeep_dummy,
+        m_axis_cq_tlast         => rsi_cq_tlast_dummy,
         m_axis_cq_tready        => '1',
-        m_axis_cq_tuser         => open,
-        m_axis_cq_tvalid        => open,
+        m_axis_cq_tuser         => rsi_cq_tuser_dummy,
+        m_axis_cq_tvalid        => rsi_cq_tvalid_dummy,
 
         cfg_interrupt_msi_int   => <cfg_interrupt_msi_int_rsi1>,   -- MSI1..MSI4 = bit 0..3
         cfg_interrupt_msi_sent  => <cfg_interrupt_msi_sent_rsi1>,
