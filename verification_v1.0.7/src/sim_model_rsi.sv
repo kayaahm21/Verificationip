@@ -88,9 +88,10 @@ module sim_model_rsi #(
     int          fd = 0;
     string       out_name;
 
-    task automatic logf(string s);
+    // fonksiyon (task degil): xsim, fonksiyonlarin task cagirmasina izin vermez; fonksiyon hem task hem fonksiyondan cagrilabilir
+    function automatic void logf(string s);
         if (fd != 0) begin $fdisplay(fd, "%s", s); $fflush(fd); end
-    endtask
+    endfunction
 
     initial begin
         asm = new();
@@ -232,6 +233,7 @@ module sim_model_rsi #(
         return ok;
     endfunction
 
+    localparam int KS [3] = '{3, 1, 2};   // denenen birlestirme carpanlari (once toplam)
     int unsigned round_no = 0;
 
     // ---------------- Turu kapat: coz, dogrula, dok, temizle ----------------
@@ -421,8 +423,6 @@ module sim_model_rsi #(
         rsi_report_round(RSI_ID, tur, basarili, dogru, rule, beams_q);
         reset_round();
     endtask
-
-    localparam int KS [3] = '{3, 1, 2};
 
     function automatic void reset_round();
         mem.delete();
