@@ -15,6 +15,7 @@
 // =====================================================================
 module tb_rsi_check;
     import cpu_pkg::*;
+    import rsi_pkg::*;
 
     logic         sys_clk = 1'b0;
     logic         uclk       [1:3];

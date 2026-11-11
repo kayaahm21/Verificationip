@@ -10,8 +10,9 @@ CİT/HUZPAR cevapları, otomatik TLP bölme, IÜB) aynen çalışır; yalnızca 
 |---|---|---|
 | `src/aurora_64b66b_vip.v` | **değişti** | `0000E001` (HUZPAR) alınınca, `DATA_DELAY_CLKS` sonra **hüzme verisi (`00000002`)** gönderir (192 bit `m_axi_rx_*`). Bkz. `docs/SHOB_HUZME_VERISI.md` |
 | `src/sim_model_rsi.sv` | **yeni** | RSİ işlemci modeli (RSİ1/2/3 için ayrı örnek). Bkz. `docs/RSI_MODELI.md` |
-| `src/cpu_pkg.sv` | **değişti** | Paylaşılan RSİ durumu (`rsi_start_addr`, `turlar`, tur raporu), `track_cfg_msgs`, **MSI7 (bit 6)** etiketi |
-| `src/scn_pkg.sv` | **değişti** | Sürücü her TLP'yi `cpu_pkg::track_cfg_msgs`'e de verir (1 satır) |
+| `src/cpu_pkg.sv` | **değişti (küçük)** | Yalnızca **MSI7 (bit 6)** etiketi ve `msi7_count` |
+| `src/rsi_pkg.sv` | **yeni** | Paylaşılan RSİ durumu (`rsi_start_addr`, `turlar`, tur raporu), `track_cfg_msgs`. `cpu_pkg`'den ayrıldı (RSİ kullanılmıyorsa projeye eklenmeyebilir) |
+| `src/scn_pkg.sv` | **değişti** | Sürücü her TLP'yi `rsi_pkg::track_cfg_msgs`'e de verir; **yalnızca `VIP_RSI` tanımlıysa derlenir** (1 satır) |
 | `tools/gen_huzme_rounds.py` | **yeni** | Çok turlu senaryo üretici. Bkz. `docs/SENARYO_URETICI.md` |
 | `examples/input_huzme_turlari.txt` | **yeni** | 3 turlu hazır senaryo (adres atama + 3 tur) |
 | `examples/scenario_huzme_test.txt` | **yeni** | Test senaryosu (2 tur, küçük) |
@@ -49,3 +50,14 @@ CİT/HUZPAR cevapları, otomatik TLP bölme, IÜB) aynen çalışır; yalnızca 
 `tb_aurora8b_check` (eskiler), **`tb_shob_data_check`, `tb_rsi_check`, `tb_scn_rsi_check`** (yeni).
 Hepsi geçince `HEPSI GECTI` yazar. Vivado xsim 2020.2 ile **çalıştırılmadı** (bu ortamda yok); yeni SV kodunda
 xsim'in sevmediği bilinen kalıplardan kaçınıldı ama ilk derlemede küçük bir uyumsuzluk çıkarsa haber verin.
+
+## xsim'de RSİ'siz kullanım (v1.0.7 düzeltmesi)
+
+v1.0.7'nin ilk halinde RSİ durumu `cpu_pkg.sv` içindeydi ve Vivado xsim 2020.2'de elaborate sırasında `EXCEPTION_ACCESS_VIOLATION` verdi
+(`cpu_pkg.sv` + `scn_pkg.sv` v1.0.5'e dönülünce çözüldü). Bu yüzden RSİ kodu **ayrı pakete** (`rsi_pkg.sv`) taşındı:
+
+- **RSİ'siz kullanım:** `rsi_pkg.sv` ve `sim_model_rsi.sv` projede **olmasın**; `VIP_RSI` tanımlama. `cpu_pkg.sv` v1.0.5'ten yalnızca MSI7 etiketiyle ayrılır.
+- **RSİ'li kullanım:** `rsi_pkg.sv` ve `sim_model_rsi.sv`'yi ekleyin, `sim_1` ayarlarında `verilog_define` olarak `VIP_RSI` tanımlayın
+  (`set_property verilog_define {VIP_RSI} [get_filesets sim_1]`), derleme sırası: `cpu_pkg`, `rsi_pkg`, `scn_pkg`.
+- Çökmenin hangi satırdan kaynaklandığı **bilinmiyor** (xsim bu ortamda yok). İlişkisel dizi iç içeliği azaltıldı; yine çökerse `rsi_pkg.sv`
+  içinde aranır.

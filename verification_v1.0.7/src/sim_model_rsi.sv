@@ -57,6 +57,7 @@ module sim_model_rsi #(
     output logic                     huzme_basi_gen
 );
     import cpu_pkg::*;
+    import rsi_pkg::*;
 
     initial begin user_clk = 1'b0; forever #4 user_clk = ~user_clk; end
     initial begin
@@ -249,7 +250,7 @@ module sim_model_rsi #(
         longint      vi, vq;
         int unsigned m, n, prev_m, prev_n, nbeams, detail_n;
         int unsigned beam_n [int unsigned];         // huzme -> ornek sayisi
-        bit          beam_seen [int unsigned][int unsigned];   // huzme -> n -> goruldu
+        bit          seen_mn [bit [63:0]];                    // anahtar {huzme, ornek}: goruldu mu (tek seviyeli)
         int unsigned dup_samples, gaps, bad_samples, mn_inc_n, mn_inc_m;
         int unsigned beams_q[$];
         string       layout;
@@ -259,7 +260,7 @@ module sim_model_rsi #(
         bit          have_prev;
 
         // otomatik gorev yerelleri simulatorlerde (Verilator) cagrilar arasi kalabilir: acikca temizle
-        keys.delete(); beams_q.delete(); beam_n.delete(); beam_seen.delete();
+        keys.delete(); beams_q.delete(); beam_n.delete(); seen_mn.delete();
         round_no++;
         tur = rsi_tur_idx[RSI_ID];
         rsi_tur_idx[RSI_ID] = tur + 1;
@@ -338,8 +339,8 @@ module sim_model_rsi #(
         for (i = 0; k_best != 0 && i + 1 < nsamp; i += 2) begin
             if (f32_to_int(mem[keys[i]], vi) && f32_to_int(mem[keys[i+1]], vq) &&
                 vi > 0 && vi % k_best == 0 && vq == -vi && code_to_mn(vi / k_best, m, n)) begin
-                if (beam_seen.exists(m) && beam_seen[m].exists(n)) dup_samples++;
-                beam_seen[m][n] = 1'b1;
+                if (seen_mn.exists({32'(m), 32'(n)})) dup_samples++;
+                seen_mn[{32'(m), 32'(n)}] = 1'b1;
                 if (beam_n.exists(m)) beam_n[m]++; else beam_n[m] = 1;
                 if (have_prev) begin
                     if (m == prev_m && n == prev_n + 1) mn_inc_n++;

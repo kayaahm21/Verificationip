@@ -65,14 +65,14 @@ grep -q "TUM TESTLER GECTI" $TOP.log
 TOP=tb_rsi_check
 echo "================ $TOP ================"
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-INITIALDLY --top-module $TOP \
-    -Mdir obj_$TOP cpu_pkg.sv sim_model_rsi.sv $TOP.sv
+    -Mdir obj_$TOP cpu_pkg.sv rsi_pkg.sv sim_model_rsi.sv $TOP.sv
 ./obj_$TOP/V$TOP +verilator+error+limit+100000 | tee $TOP.log
 grep -q "TUM TESTLER GECTI" $TOP.log
 # Senaryo -> surucu -> RSI paylasilan durumu
 TOP=tb_scn_rsi_check
 echo "================ $TOP ================"
-verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-INITIALDLY --top-module $TOP \
-    -Mdir obj_$TOP axis_tx_if.sv beam_if.sv cpu_pkg.sv scn_pkg.sv sim_model_cpu.sv $TOP.sv
+verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-INITIALDLY -DVIP_RSI --top-module $TOP \
+    -Mdir obj_$TOP axis_tx_if.sv beam_if.sv cpu_pkg.sv rsi_pkg.sv scn_pkg.sv sim_model_cpu.sv $TOP.sv
 ./obj_$TOP/V$TOP +verilator+error+limit+100000 | tee $TOP.log
 grep -q "TUM TESTLER GECTI" $TOP.log
 echo "================ HEPSI GECTI ================"

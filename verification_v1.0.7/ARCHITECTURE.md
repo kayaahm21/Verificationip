@@ -400,18 +400,18 @@ tasarımın doğru BAR'dan seçim yapıp yapmadığını sınamak için descript
 ## Hüzme verisi akışı
 
 ```
-senaryo ─ 1DEA0001/1DEA0003 ─► CPU VIP sürücüsü ──► cpu_pkg ortak durum (rsi_start_addr, turlar)
+senaryo ─ 1DEA0001/1DEA0003 ─► CPU VIP sürücüsü ──► rsi_pkg ortak durum (rsi_start_addr, turlar)
         ─ 0000E001 (BAR1/2) ─► SHOB VIP ─ DATA_DELAY ─► m_axi_rx_* (192 bit) 00000002 hüzme verisi ─► SİFPGA
                                                                                        │ (tasarım)
                                        RSİ modelleri ◄── PCIe MemWr (float32 I/Q) ◄───┘
-                                       MSI1/MSI2 ─► ISR: çöz, doğrula, dök, sil ─► cpu_pkg.rsi_report_round ─► rsi_tur_ozeti.txt
+                                       MSI1/MSI2 ─► ISR: çöz, doğrula, dök, sil ─► rsi_pkg.rsi_report_round ─► rsi_tur_ozeti.txt
 ```
 
 - **SHOB göndericisi:** HUZPAR → kuyruk (derinlik 8) → `DATA_DELAY_CLKS` sonra mesaj; beat'ler art arda, 24 B/beat, kısmi son beat.
   Kendini tarif eden desen (`kod=((m+1)<<15)|(n&7FFF)`, I=+k·kod, Q=−k·kod). Ayrıntı: `docs/SHOB_HUZME_VERISI.md`.
-- **CPU paketi (`cpu_pkg`):** `track_cfg_msgs(pkt, cont)` sürücüden her TLP için çağrılır (bölünmüş mesajın devam paketleri atlanır);
+- **RSİ paketi (`rsi_pkg`, `cpu_pkg`'den ayrı; sürücü `VIP_RSI` tanımlıysa çağırır):** `track_cfg_msgs(pkt, cont)` sürücüden her TLP için çağrılır (bölünmüş mesajın devam paketleri atlanır);
   `huzme_tur` (tur bilgisi), `turlar[$]`, `rsi_tur_idx[1:3]`, `tur_rapor`/`rsi_report_round` (tur birleşim kontrolü).
-  Bit 6 MSI7 olarak işlenir (`msi7_count`).
+  Bit 6 MSI7 olarak işlenir (`cpu_pkg`, `msi7_count`).
 - **RSİ modeli:** bkz. `docs/RSI_MODELI.md`.
 
 ## Tur yaşam döngüsü

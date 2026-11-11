@@ -488,7 +488,9 @@ package scn_pkg;
                         // Konfigurasyon mesaji (ID eslesirse) FPGA'ya gitmeden ONCE islemci tarafinda da
                         // buffer'i kurar; FPGA'nin ilk yazisi geldiginde model hazir olur.
                         if (cpu != null && !cmd.tlp.cont) cpu.maybe_program(cmd.tlp.tlp_packet);
-                        cpu_pkg::track_cfg_msgs(cmd.tlp.tlp_packet, cmd.tlp.cont);   // v1.0.7: RSI adres/tur bilgisi
+`ifdef VIP_RSI
+                        rsi_pkg::track_cfg_msgs(cmd.tlp.tlp_packet, cmd.tlp.cont);   // v1.0.7: RSI adres/tur bilgisi (yalniz VIP_RSI tanimliysa)
+`endif
                         drive_item(cmd.tlp);
                     end
                     CMD_WAIT_NS: begin
