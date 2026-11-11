@@ -47,7 +47,7 @@ fazlalık RSİ1'e" varsayıldı, yalnızca sayı kontrolü yapılır).
 
 ## Tur eşleştirme (hangi MSI hangi tura ait?)
 
-CPU VIP sürücüsü her `1DEA0003`'ü bir **tur** olarak sıraya koyar (`rsi_pkg::turlar`). Her RSİ, kendi MSI1/MSI2'sinde sıradaki turu
+CPU VIP sürücüsü her `1DEA0003`'ü bir **tur** olarak sıraya koyar (`rsi_pkg` `t_*` dizileri). Her RSİ, kendi MSI1/MSI2'sinde sıradaki turu
 kapatır (`rsi_tur_idx[RSI_ID]++`). Bu yüzden **`1DEA0003` o turun verisinden önce senaryoda yer almalı** ve her tur için her RSİ'den
 bir MSI1/MSI2 gelmeli. Bir RSİ'ye hüzme düşmüyorsa (n_k = 0) o RSİ'den MSI beklenmez.
 

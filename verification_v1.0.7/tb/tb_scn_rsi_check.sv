@@ -47,13 +47,13 @@ module tb_scn_rsi_check;
         #150000;   // adres atama + iki tur (HB planlari 20 us)
         chk(rsi_start_valid && rsi_start_addr[1] == 64'h10000000 && rsi_start_addr[2] == 64'h20000000 &&
             rsi_start_addr[3] == 64'h30000000, "G1 1DEA0001: RSI baslangic adresleri (10000000/20000000/30000000)");
-        chk(turlar.size() == 2, "G2 iki 1DEA0003 turu yakalandi");
-        if (turlar.size() >= 2) begin
-            chk(turlar[0].m == 4 && turlar[0].darbe == 1 && turlar[0].ornek == 4 && turlar[0].nsample == 4, "G3 tur 1: M=4, darbe=1, ornek=4, N=4");
-            chk(turlar[0].n_k[1] == 2 && turlar[0].n_k[2] == 1 && turlar[0].n_k[3] == 1, "G3 tur 1: RSI basina huzme 2/1/1");
-            chk(turlar[0].huzme_id == 32'hA001 && turlar[1].huzme_id == 32'hA002, "G4 huzme ID'leri A001, A002");
-            chk(turlar[1].m == 8 && turlar[1].n_k[1] == 3 && turlar[1].n_k[2] == 3 && turlar[1].n_k[3] == 2, "G5 tur 2: M=8, RSI basina huzme 3/3/2");
-            chk(turlar[0].offset[1] == 0 && turlar[1].offset[1] == 64'h100 && turlar[1].offset[3] == 64'h100, "G6 offset modu 'step': tur 2'de 0x100");
+        chk(t_count == 2, "G2 iki 1DEA0003 turu yakalandi");
+        if (t_count >= 2) begin
+            chk(t_m[0] == 4 && t_darbe[0] == 1 && t_ornek[0] == 4 && t_nsample[0] == 4, "G3 tur 1: M=4, darbe=1, ornek=4, N=4");
+            chk(t_nk[1][0] == 2 && t_nk[2][0] == 1 && t_nk[3][0] == 1, "G3 tur 1: RSI basina huzme 2/1/1");
+            chk(t_hid[0] == 32'hA001 && t_hid[1] == 32'hA002, "G4 huzme ID'leri A001, A002");
+            chk(t_m[1] == 8 && t_nk[1][1] == 3 && t_nk[2][1] == 3 && t_nk[3][1] == 2, "G5 tur 2: M=8, RSI basina huzme 3/3/2");
+            chk(t_off[1][0] == 0 && t_off[1][1] == 64'h100 && t_off[3][1] == 64'h100, "G6 offset modu 'step': tur 2'de 0x100");
         end
         if (errors == 0) $display("[TB] *** TUM TESTLER GECTI ***");
         else             $display("[TB] *** %0d HATA ***", errors);

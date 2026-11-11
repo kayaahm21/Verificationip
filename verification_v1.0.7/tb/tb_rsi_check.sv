@@ -233,7 +233,7 @@ module tb_rsi_check;
         chk(rsi_start_valid && rsi_start_addr[1] == SA1 && rsi_start_addr[2] == SA2 && rsi_start_addr[3] == SA3,
             "R0 1DEA0001'den RSI baslangic adresleri okundu");
         cfg_huzpar(64'h100, 64'h200, 64'h300, 32'h0000A001, 6, 2, 4, 2, 2, 2);
-        chk(turlar.size() == 1 && turlar[0].m == 6 && turlar[0].nsample == 8 && turlar[0].n_k[1] == 2 && turlar[0].offset[2] == 64'h200,
+        chk(t_count == 1 && t_m[0] == 6 && t_nsample[0] == 8 && t_nk[1][0] == 2 && t_off[2][0] == 64'h200,
             "R0 1DEA0003 cozuldu (M=6, N=darbe*ornek=8, n_k, offset)");
         b1 = '{0, 1}; b2 = '{2, 3}; b3 = '{4, 5};
         fork
@@ -242,9 +242,9 @@ module tb_rsi_check;
             begin write_data(3, SA3 + 64'h300, b3, 8, 0, 3, 1'b0); msi(3, 0); end
         join
         repeat (100) @(posedge uclk[1]);
-        chk(raporlar.size() >= 1 && raporlar[0].printed, "R1 tur 1: uc RSI raporladi");
-        chk(raporlar[0].dogru[1] && raporlar[0].dogru[2] && raporlar[0].dogru[3], "R1 tur 1: uc RSI DOGRU");
-        chk(raporlar[0].basarili[1] && raporlar[0].basarili[2] && raporlar[0].basarili[3], "R1 tur 1: MSI1 (yazildi) ile kapandi");
+        chk(r_printed[0], "R1 tur 1: uc RSI raporladi");
+        chk(r_dogru[1][0] && r_dogru[2][0] && r_dogru[3][0], "R1 tur 1: uc RSI DOGRU");
+        chk(r_basarili[1][0] && r_basarili[2][0] && r_basarili[3][0], "R1 tur 1: MSI1 (yazildi) ile kapandi");
         chk(count_in("rsi_out_rsi1.txt", "BIRLESTIRME KURALI: TOPLAM (SHOB-1 + SHOB-2) (carpan=3)") >= 1, "R1 RSI1 kurali: toplam (carpan 3)");
         chk(count_in("rsi_out_rsi1.txt", "YERLESIM: HUZME-ANA") >= 1, "R1 RSI1 yerlesim: huzme-ana");
         chk(count_in("rsi_out_rsi2.txt", "ADRES OK") >= 1, "R1 RSI2 adres = baslangic + offset");
@@ -259,8 +259,8 @@ module tb_rsi_check;
             begin write_data(3, SA3 + 64'h3000, b3, 4, 0, 3, 1'b0); msi(3, 0); end
         join
         repeat (100) @(posedge uclk[1]);
-        chk(raporlar.size() >= 2 && raporlar[1].printed, "R2 tur 2: uc RSI raporladi");
-        chk(raporlar[1].dogru[1] && raporlar[1].dogru[2] && raporlar[1].dogru[3], "R2 tur 2: uc RSI DOGRU (RSI basina 2/1/1 huzme)");
+        chk(r_printed[1], "R2 tur 2: uc RSI raporladi");
+        chk(r_dogru[1][1] && r_dogru[2][1] && r_dogru[3][1], "R2 tur 2: uc RSI DOGRU (RSI basina 2/1/1 huzme)");
         chk(count_in("rsi_out_rsi1.txt", "YERLESIM: ORNEK-ANA") >= 1, "R2 RSI1 yerlesim: ornek-ana saptandi");
         chk(count_in("rsi_tur_ozeti.txt", "birlesim: 4 huzme bekleniyor, eksik=0, birden cok RSI'de=0") >= 1, "R2 birlesim: 4 huzme eksiksiz");
 
@@ -273,9 +273,9 @@ module tb_rsi_check;
             begin write_data(3, SA3 + 64'hC0, b3, 4, 0, 3, 1'b1); msi(3, 0); end      // son ornek eksik
         join
         repeat (100) @(posedge uclk[1]);
-        chk(raporlar.size() >= 3 && raporlar[2].dogru[1], "R3 RSI1 (yalniz SHOB-1 kurali) DOGRU sayildi");
-        chk(!raporlar[2].dogru[2], "R3 RSI2 yanlis baslangic adresi YAKALANDI");
-        chk(!raporlar[2].dogru[3], "R3 RSI3 eksik ornek YAKALANDI");
+        chk(r_reported[1][2] && r_dogru[1][2], "R3 RSI1 (yalniz SHOB-1 kurali) DOGRU sayildi");
+        chk(r_reported[2][2] && !r_dogru[2][2], "R3 RSI2 yanlis baslangic adresi YAKALANDI");
+        chk(r_reported[3][2] && !r_dogru[3][2], "R3 RSI3 eksik ornek YAKALANDI");
         chk(count_in("rsi_out_rsi1.txt", "BIRLESTIRME KURALI: yalniz SHOB-1 (carpan=1)") >= 1, "R3 RSI1 kural: yalniz SHOB-1");
         chk(count_in("rsi_out_rsi2.txt", "ADRES HATA") >= 1, "R3 RSI2 ADRES HATA satiri");
         chk(count_in("rsi_out_rsi3.txt", "HATA huzme 5: 3 ornek var, beklenen N=4") >= 1, "R3 RSI3 eksik ornek satiri");
@@ -290,7 +290,7 @@ module tb_rsi_check;
             begin write_data(3, SA3, b3, 4, 0, 3, 1'b0); msi(3, 0); end
         join
         repeat (100) @(posedge uclk[1]);
-        chk(raporlar.size() >= 4 && !raporlar[3].basarili[1] && raporlar[3].basarili[2], "R4 RSI1 MSI2 ile (yazilamadi), RSI2 MSI1 ile kapandi");
+        chk(r_reported[1][3] && !r_basarili[1][3] && r_basarili[2][3], "R4 RSI1 MSI2 ile (yazilamadi), RSI2 MSI1 ile kapandi");
         chk(count_in("rsi_out_rsi1.txt", "(MSI2: YAZILAMADI)") >= 1, "R4 RSI1 dosyasinda MSI2 turu");
 
         if (errors == 0) $display("[TB] *** TUM TESTLER GECTI ***");

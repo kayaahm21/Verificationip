@@ -17,7 +17,7 @@
 //   * Kontroller (RSI basina): baslangic adresi = RSI baslangic adresi (1DEA0001) + offset (1DEA0003); tum ornekler gecerli desen;
 //     bosluk yok; her huzmede N ornek eksiksiz ve bir kez; huzme sayisi = 1DEA0003'teki RSI'ye indirilecek huzme sayisi.
 //     Turun tum RSI'leri raporlayinca cpu_pkg::rsi_report_round birlesim kontrolu (her huzme 0..M-1 bir kez) yapar.
-//   * Cikti: <OUT_PREFIX>_rsi<RSI_ID>.txt ve turlarin ozeti rsi_tur_ozeti.txt (cpu_pkg).
+//   * Cikti: <OUT_PREFIX>_rsi<RSI_ID>.txt ve turlarin ozeti rsi_tur_ozeti.txt (rsi_pkg).
 //   * Veri yerlesimi (huzme-ana mi, ornek-ana mi) otomatik saptanir ve raporlanir.
 // =====================================================================
 module sim_model_rsi #(
@@ -188,112 +188,124 @@ module sim_model_rsi #(
     endtask
 
     // ---------------- float32 -> tamsayi (tam olmayan degerleri reddeder) ----------------
-    function automatic bit f32_to_int(bit [31:0] f, output longint v);
-        int          e, sh;
-        bit [23:0]   m;
-        bit [63:0]   mag;
-        v = 0;
+    // Sade tutuldu (xsim): output argumanli fonksiyon yok; gecerlilik ve deger ayri fonksiyonlarda.
+    function automatic bit f32_ok(bit [31:0] f);
+        int e, sh;
         if (f[30:0] == 31'd0) return 1'b1;               // +-0
         e = int'(f[30:23]);
-        if (e == 255) return 1'b0;                       // inf/NaN
-        if (e == 0) return 1'b0;                         // denormal
-        m  = {1'b1, f[22:0]};
+        if (e == 255 || e == 0) return 1'b0;             // inf/NaN, denormal
         sh = e - 127 - 23;
-        if (sh >= 0) begin
-            if (sh > 38) return 1'b0;
-            mag = 64'(m) << sh;
-        end else begin
+        if (sh > 38) return 1'b0;
+        if (sh < 0) begin
             if (-sh > 23) return 1'b0;
-            if ((m & ((24'd1 << (-sh)) - 24'd1)) != 24'd0) return 1'b0;   // kesirli
-            mag = 64'(m) >> (-sh);
+            if (({1'b1, f[22:0]} & ((24'd1 << (-sh)) - 24'd1)) != 24'd0) return 1'b0;   // kesirli
         end
-        v = f[31] ? -longint'(mag) : longint'(mag);
         return 1'b1;
     endfunction
 
-    // kod -> (m, n); gecerli m: 1..96 arasi (m+1)
-    function automatic bit code_to_mn(longint code, output int unsigned m, output int unsigned n);
-        m = 0; n = 0;
+    function automatic longint f32_val(bit [31:0] f);
+        int        e, sh;
+        bit [63:0] mag;
+        if (f[30:0] == 31'd0) return 0;
+        e  = int'(f[30:23]);
+        sh = e - 127 - 23;
+        if (sh >= 0) mag = 64'({1'b1, f[22:0]}) << sh;
+        else         mag = 64'({1'b1, f[22:0]}) >> (-sh);
+        return f[31] ? -longint'(mag) : longint'(mag);
+    endfunction
+
+    // kod = ((m+1)<<15) | n : gecerli mi, m, n
+    function automatic bit code_ok(longint code);
         if (code <= 0) return 1'b0;
-        n = int'(code & 64'h7FFF);
-        m = int'(code >> 15) - 1;
         if ((code >> 15) < 1 || (code >> 15) > 960) return 1'b0;
         return 1'b1;
     endfunction
+    function automatic int code_m(longint code);
+        return int'(code >> 15) - 1;
+    endfunction
+    function automatic int code_n(longint code);
+        return int'(code & 64'h7FFF);
+    endfunction
 
-    // Verilen carpan k icin tum I/Q ciftleri gecerli desen mi? (adres sirasina gore ardisik kelimeler)
-    function automatic int unsigned count_valid(int k, bit [63:0] keys[$], int unsigned limit);
-        int unsigned ok = 0;
-        longint      vi, vq;
-        int unsigned m, n;
-        for (int unsigned i = 0; i + 1 < keys.size() && i / 2 < limit; i += 2) begin
-            if (f32_to_int(mem[keys[i]], vi) && f32_to_int(mem[keys[i+1]], vq)) begin
-                if (vi > 0 && vi % k == 0 && vq == -vi && code_to_mn(vi / k, m, n)) ok++;
+    // anahtarlar (artan adres) modul duzeyinde tutulur
+    bit [63:0]   keys_m [$];
+    int          beam_n_m [int];             // huzme -> ornek sayisi
+    bit          seen_mn_m [bit [63:0]];     // anahtar {huzme, ornek}: goruldu mu
+    int          beam_list_m [$];            // bu turda gorulen huzmeler (artan sirayla degil, ilk gorulme sirasiyla)
+
+    // Verilen carpan k icin kac I/Q cifti gecerli desen? (adres sirasina gore ardisik kelimeler)
+    function automatic int count_valid(int k);
+        int     ok;
+        longint vi, vq;
+        ok = 0;
+        for (int i = 0; i + 1 < keys_m.size(); i += 2) begin
+            if (f32_ok(mem[keys_m[i]]) && f32_ok(mem[keys_m[i+1]])) begin
+                vi = f32_val(mem[keys_m[i]]);
+                vq = f32_val(mem[keys_m[i+1]]);
+                if (vi > 0 && (vi % k) == 0 && vq == -vi && code_ok(vi / k)) ok++;
             end
         end
         return ok;
     endfunction
 
-    localparam int KS [3] = '{3, 1, 2};   // denenen birlestirme carpanlari (once toplam)
-    int unsigned round_no = 0;
+    function automatic int ks(int j);      // denenen birlestirme carpanlari (once toplam)
+        if (j == 0) return 3;
+        else if (j == 1) return 1;
+        else return 2;
+    endfunction
+
+    int round_no = 0;
 
     // ---------------- Turu kapat: coz, dogrula, dok, temizle ----------------
     task automatic process_round(bit basarili);
-        bit [63:0]   keys[$];
         bit [63:0]   cur;
-        int unsigned tur, nsamp, npair, errors, warns, i;
-        huzme_tur    t;
+        int          tur, nsamp, npair, errors, warns, i, j;
+        bit          has_t;
         bit [63:0]   start_expected, start_actual;
-        int          k_best;
-        int unsigned best_ok, ok_k;
+        int          k_best, best_ok, ok_k;
         string       rule;
-        longint      vi, vq;
-        int unsigned m, n, prev_m, prev_n, nbeams, detail_n;
-        int unsigned beam_n [int unsigned];         // huzme -> ornek sayisi
-        bit          seen_mn [bit [63:0]];                    // anahtar {huzme, ornek}: goruldu mu (tek seviyeli)
-        int unsigned dup_samples, gaps, bad_samples, mn_inc_n, mn_inc_m;
-        int unsigned beams_q[$];
-        string       layout;
-        bit          dogru;
-        longint      lo, hi;
-        int unsigned nk_exp;
-        bit          have_prev;
+        longint      vi, vq, code;
+        int          m, n, prev_m, prev_n, nbeams, detail_n, nk_exp, bn;
+        int          dup_samples, gaps, bad_samples, mn_inc_n, mn_inc_m;
+        string       layout, sl;
+        bit          dogru, have_prev;
 
-        // otomatik gorev yerelleri simulatorlerde (Verilator) cagrilar arasi kalabilir: acikca temizle
-        keys.delete(); beams_q.delete(); beam_n.delete(); seen_mn.delete();
+        // yerel olmayan durum: acikca temizle
+        keys_m.delete(); beam_n_m.delete(); seen_mn_m.delete(); beam_list_m.delete();
         round_no++;
         tur = rsi_tur_idx[RSI_ID];
         rsi_tur_idx[RSI_ID] = tur + 1;
-        t = (tur < turlar.size()) ? turlar[tur] : null;
+        has_t = tur_var(tur);
+        nk_exp = has_t ? int'(t_nk[RSI_ID][tur]) : 0;
         errors = 0; warns = 0; bad_samples = 0; dup_samples = 0; gaps = 0;
         logf("");
         logf($sformatf("%0t ===== TUR %0d (MSI%0s) =====", $time, tur + 1, basarili ? "1: yazildi" : "2: YAZILAMADI"));
 
         // ---- anahtarlar (artan adres) ----
         if (mem.first(cur)) begin
-            do keys.push_back(cur); while (mem.next(cur));
+            keys_m.push_back(cur);
+            while (mem.next(cur)) keys_m.push_back(cur);
         end
-        nsamp = keys.size();
+        nsamp = keys_m.size();
         logf($sformatf("%0t alinan MemWr=%0d, kelime=%0d (%0d bayt), atilan kelime=%0d, kismi be uyarilari=%0d",
                        $time, wr_count, nsamp, nsamp * 4, dropped, partial_be_warn));
         if (nsamp == 0) begin
             logf($sformatf("%0t HATA bu turda hic veri yazilmamis", $time));
-            errors++;
-            begin int unsigned empty_beams[$]; rsi_report_round(RSI_ID, tur, basarili, 1'b0, "-", empty_beams); end
+            rsi_report_round(RSI_ID, tur, basarili, 1'b0, 0, 0);
             reset_round();
             return;
         end
 
         // ---- beklenen baslangic adresi ----
-        start_actual = keys[0] << 2;
-        if (t != null && rsi_start_valid) begin
-            start_expected = rsi_start_addr[RSI_ID] + t.offset[RSI_ID];
+        start_actual = keys_m[0] << 2;
+        if (has_t && rsi_start_valid) begin
+            start_expected = rsi_start_addr[RSI_ID] + t_off[RSI_ID][tur];
             if (start_actual == start_expected)
                 logf($sformatf("%0t ADRES OK: ilk yazilan adres=%h = baslangic(%h) + offset(%h)", $time, start_actual,
-                               rsi_start_addr[RSI_ID], t.offset[RSI_ID]));
+                               rsi_start_addr[RSI_ID], t_off[RSI_ID][tur]));
             else begin
                 logf($sformatf("%0t ADRES HATA: ilk yazilan adres=%h, beklenen=%h (baslangic %h + offset %h)", $time,
-                               start_actual, start_expected, rsi_start_addr[RSI_ID], t.offset[RSI_ID]));
+                               start_actual, start_expected, rsi_start_addr[RSI_ID], t_off[RSI_ID][tur]));
                 errors++;
             end
         end else begin
@@ -308,26 +320,24 @@ module sim_model_rsi #(
             errors++;
         end
         for (i = 1; i < nsamp; i++)
-            if (keys[i] != keys[i-1] + 1) begin
+            if (keys_m[i] != keys_m[i-1] + 1) begin
                 gaps++;
-                if (gaps <= 8) logf($sformatf("%0t HATA bosluk: %h sonrasi %h (kelime adresleri)", $time, keys[i-1] << 2, keys[i] << 2));
+                if (gaps <= 8) logf($sformatf("%0t HATA bosluk: %h sonrasi %h (kelime adresleri)", $time, keys_m[i-1] << 2, keys_m[i] << 2));
             end
         if (gaps != 0) errors++;
 
         // ---- birlestirme kurali: k = 3 (toplam), 1, 2 ----
         npair = nsamp / 2;
         k_best = 0; best_ok = 0;
-        foreach (KS[j]) begin
-            ok_k = count_valid(KS[j], keys, npair);
-            if (ok_k > best_ok) begin best_ok = ok_k; k_best = KS[j]; end
-            if (ok_k == npair) begin k_best = KS[j]; best_ok = ok_k; break; end
+        for (j = 0; j < 3; j++) begin
+            ok_k = count_valid(ks(j));
+            if (ok_k > best_ok) begin best_ok = ok_k; k_best = ks(j); end
+            if (ok_k == npair) begin k_best = ks(j); best_ok = ok_k; break; end
         end
-        case (k_best)
-            3:       rule = "TOPLAM (SHOB-1 + SHOB-2)";
-            1:       rule = "yalniz SHOB-1";
-            2:       rule = "yalniz SHOB-2";
-            default: rule = "TANINMADI";
-        endcase
+        if (k_best == 3)      rule = "TOPLAM (SHOB-1 + SHOB-2)";
+        else if (k_best == 1) rule = "yalniz SHOB-1";
+        else if (k_best == 2) rule = "yalniz SHOB-2";
+        else                  rule = "TANINMADI";
         logf($sformatf("%0t BIRLESTIRME KURALI: %s (carpan=%0d); gecerli ornek=%0d/%0d", $time, rule, k_best, best_ok, npair));
         if (k_best == 0) errors++;
         else if (best_ok != npair) errors++;
@@ -337,11 +347,19 @@ module sim_model_rsi #(
         // ---- ornek ornek coz: huzme/ornek kapsami, yerlesim ----
         mn_inc_n = 0; mn_inc_m = 0; have_prev = 1'b0; prev_m = 0; prev_n = 0; detail_n = 0;
         for (i = 0; k_best != 0 && i + 1 < nsamp; i += 2) begin
-            if (f32_to_int(mem[keys[i]], vi) && f32_to_int(mem[keys[i+1]], vq) &&
-                vi > 0 && vi % k_best == 0 && vq == -vi && code_to_mn(vi / k_best, m, n)) begin
-                if (seen_mn.exists({32'(m), 32'(n)})) dup_samples++;
-                seen_mn[{32'(m), 32'(n)}] = 1'b1;
-                if (beam_n.exists(m)) beam_n[m]++; else beam_n[m] = 1;
+            vi = 0; vq = 0;
+            if (f32_ok(mem[keys_m[i]]) && f32_ok(mem[keys_m[i+1]])) begin
+                vi = f32_val(mem[keys_m[i]]);
+                vq = f32_val(mem[keys_m[i+1]]);
+            end
+            if (vi > 0 && (vi % k_best) == 0 && vq == -vi && code_ok(vi / k_best)) begin
+                code = vi / k_best;
+                m = code_m(code);
+                n = code_n(code);
+                if (seen_mn_m.exists({32'(m), 32'(n)})) dup_samples++;
+                seen_mn_m[{32'(m), 32'(n)}] = 1'b1;
+                if (beam_n_m.exists(m)) beam_n_m[m] = beam_n_m[m] + 1;
+                else begin beam_n_m[m] = 1; beam_list_m.push_back(m); end
                 if (have_prev) begin
                     if (m == prev_m && n == prev_n + 1) mn_inc_n++;
                     else if (n == prev_n && m == prev_m + 1) mn_inc_m++;
@@ -349,12 +367,12 @@ module sim_model_rsi #(
                 prev_m = m; prev_n = n; have_prev = 1'b1;
                 if (DETAIL_LINES < 0 || detail_n < DETAIL_LINES) begin
                     detail_n++;
-                    logf($sformatf("  adres=%h huzme=%0d ornek=%0d I=%0d Q=%0d", keys[i] << 2, m, n, vi, vq));
+                    logf($sformatf("  adres=%h huzme=%0d ornek=%0d I=%0d Q=%0d", keys_m[i] << 2, m, n, vi, vq));
                 end
             end else begin
                 bad_samples++;
                 if (bad_samples <= 16)
-                    logf($sformatf("  HATALI ornek adres=%h I=%h Q=%h (float32 ham)", keys[i] << 2, mem[keys[i]], mem[keys[i+1]]));
+                    logf($sformatf("  HATALI ornek adres=%h I=%h Q=%h (float32 ham)", keys_m[i] << 2, mem[keys_m[i]], mem[keys_m[i+1]]));
             end
         end
         if (bad_samples != 0) begin
@@ -373,55 +391,38 @@ module sim_model_rsi #(
         logf($sformatf("%0t YERLESIM: %s (n-artan=%0d, m-artan=%0d)", $time, layout, mn_inc_n, mn_inc_m));
 
         // ---- huzme listesi ve kapsam ----
-        nbeams = beam_n.num();
-        if (beam_n.first(m)) begin
-            do begin
-                beams_q.push_back(m);
-            end while (beam_n.next(m));
-        end
-        nk_exp = (t != null) ? t.n_k[RSI_ID] : 0;
+        nbeams = beam_list_m.size();
         logf($sformatf("%0t HUZME SAYISI: %0d (beklenen RSI%0d icin %0s)", $time, nbeams, RSI_ID,
-                       (t != null) ? $sformatf("%0d", nk_exp) : "bilinmiyor"));
-        if (t != null && nbeams != nk_exp) begin
+                       has_t ? $sformatf("%0d", nk_exp) : "bilinmiyor"));
+        if (has_t && nbeams != nk_exp) begin
             logf($sformatf("%0t HATA huzme sayisi beklenenle farkli", $time));
             errors++;
         end
-        if (t != null) begin
-            // her huzmede N ornek, 0..N-1 eksiksiz
-            foreach (beams_q[j]) begin
-                m = beams_q[j];
-                if (beam_n[m] != t.nsample) begin
-                    logf($sformatf("%0t HATA huzme %0d: %0d ornek var, beklenen N=%0d", $time, m, beam_n[m], t.nsample));
+        sl = "  huzme listesi:";
+        for (j = 0; j < nbeams; j++) begin
+            m  = beam_list_m[j];
+            bn = beam_n_m[m];
+            if (has_t) begin
+                if (bn != int'(t_nsample[tur])) begin
+                    logf($sformatf("%0t HATA huzme %0d: %0d ornek var, beklenen N=%0d", $time, m, bn, t_nsample[tur]));
                     errors++;
                 end
-                if (m >= t.m) begin
-                    logf($sformatf("%0t HATA huzme %0d >= M(%0d)", $time, m, t.m));
+                if (m >= int'(t_m[tur])) begin
+                    logf($sformatf("%0t HATA huzme %0d >= M(%0d)", $time, m, t_m[tur]));
                     errors++;
                 end
             end
+            rsi_beam_add(tur, m);
+            if (j < 128) sl = {sl, $sformatf(" %0d", m)};
+            else if (j == 128) sl = {sl, " ..."};
         end
-        if (beams_q.size() != 0) begin
-            lo = beams_q[0]; hi = beams_q[0];
-            foreach (beams_q[j]) begin
-                if (beams_q[j] < lo) lo = beams_q[j];
-                if (beams_q[j] > hi) hi = beams_q[j];
-            end
-            logf($sformatf("%0t huzme araligi: %0d..%0d (RSI%0d'ye dusenler)", $time, lo, hi, RSI_ID));
-            begin
-                string s = "  huzme listesi:";
-                foreach (beams_q[j]) begin
-                    s = {s, $sformatf(" %0d", beams_q[j])};
-                    if (j >= 127) begin s = {s, " ..."}; break; end
-                end
-                logf(s);
-            end
-        end
+        if (nbeams != 0) logf(sl);
 
         dogru = (errors == 0);
         logf($sformatf("%0t TUR %0d SONUC: %s (hata=%0d, uyari=%0d)", $time, tur + 1, dogru ? "DOGRU" : "YANLIS", errors, warns));
         $display("[%0t] [RSI%0d] tur %0d: %s, huzme=%0d, kural=%s, hata=%0d", $time, RSI_ID, tur + 1,
                  dogru ? "DOGRU" : "YANLIS", nbeams, rule, errors);
-        rsi_report_round(RSI_ID, tur, basarili, dogru, rule, beams_q);
+        rsi_report_round(RSI_ID, tur, basarili, dogru, k_best, nbeams);
         reset_round();
     endtask
 
