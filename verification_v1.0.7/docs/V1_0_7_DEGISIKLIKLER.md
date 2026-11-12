@@ -61,3 +61,8 @@ v1.0.7'nin ilk halinde RSİ durumu `cpu_pkg.sv` içindeydi ve Vivado xsim 2020.2
   (`set_property verilog_define {VIP_RSI} [get_filesets sim_1]`), derleme sırası: `cpu_pkg`, `rsi_pkg`, `scn_pkg`.
 - Çökmenin hangi satırdan kaynaklandığı **bilinmiyor** (xsim bu ortamda yok). İlişkisel dizi iç içeliği azaltıldı; yine çökerse `rsi_pkg.sv`
   içinde aranır.
+
+## Hüzme verisi başlığı ICD'ye göre düzeltildi
+
+Önceki halde başlıkta 16–23'e N ve SHOB numarası yazıyordum, GAÇ maskeleri ve HI kullanım sıfırdı. ICD tablosuna göre: 16–23 reserved, 24–39
+GAÇ kullanım durumları (HUZPAR'daki dört maske), 40 HI kullanım (HUZPAR kart durumunun bit1..3'ü), 41–55 reserved. Bkz. `docs/SHOB_HUZME_VERISI.md`.

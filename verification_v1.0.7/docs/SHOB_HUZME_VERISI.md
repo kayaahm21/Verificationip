@@ -30,24 +30,28 @@ Toplam 24'ün katı değilse **son beat kısmidir**: `tkeep`'in düşük bitleri
 
 | Bölüm | Boyut | İçerik |
 |---|---|---|
-| Başlık | 56 B | aşağıdaki tablo (**varsayım**) |
+| Başlık | 56 B | aşağıdaki tablo (ICD) |
 | Örnekler | M·N·8 B | **örnek-ana**: `n = 0..N-1` için `m = 0..M-1` için `I (int32)`, `Q (int32)` |
 | GAÇ SCİT | 960 B | sıfır |
 | SHOB SCİT | 16 B | sıfır |
 | Reserved | 16 B | sıfır |
 
-**Başlık düzeni (VARSAYIM - ICD'de ayrıntı yok, SİFPGA zaten kullanmıyorsa önemli değil):**
+**Başlık düzeni (ICD "SHOB-1 HÜZME VERİSİ & SCİT" tablosu; SHOB-2 için aynı):**
 
 | Index | Boyut | Alan |
 |---|---|---|
-| 0 | 4 | huzme ID (HUZPAR'dakiyle aynı) |
-| 4 | 2 | durum (HUZPAR'daki sinyal işleme durumu, HO = 1) |
-| 6 | 2 | M (alma hüzme sayısı) |
-| 8 | 4 | darbe sayısı |
-| 12 | 4 | darbedeki örnek sayısı |
-| 16 | 4 | N = darbe × örnek |
-| 20 | 1 | SHOB no / desen çarpanı (shob_1 → 1, shob_2 → 2) |
-| 21..55 | 35 | sıfır |
+| 0 | 4 | Hüzme ID (HUZPAR'dakiyle aynı) |
+| 4 | 2 | SHOB sinyal işleme durumu (0 Bypass, 1 HO) |
+| 6 | 2 | SHOB alma hüzmesi sayısı M |
+| 8 | 4 | Darbe sayısı |
+| 12 | 4 | Darbedeki örnek sayısı |
+| 16 | 8 | Reserved (sıfır) |
+| 24 / 28 / 32 / 36 | 4 × 4 | GAÇ 1–30 / 31–60 / 61–90 / 91–120 kullanım durumu (HUZPAR'daki maskelerle aynı) |
+| 40 | 1 | HI kullanım durumu: bit0 HI-1, bit1 HI-2, bit2 HI-3 (HUZPAR "kart kullanım durumu"nun bit1..3'ü) |
+| 41 | 15 | Reserved (sıfır) |
+
+> v1.0.7'nin ilk halinde 16–23'e N ve SHOB numarasını, 24–40'a sıfır yazıyordum; ICD tablosuna göre düzeltildi. GAÇ maskeleri sıfır
+> gönderilirse alıcı "hiçbir GAÇ kullanılmıyor" diyebilirdi.
 
 ## Doğrulama deseni ("kendini tarif eden")
 

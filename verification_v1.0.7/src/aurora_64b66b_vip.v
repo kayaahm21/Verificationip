@@ -637,7 +637,9 @@ module aurora_64b66b_vip #(
     // Mesaj: ID(4)=00000002, LEN(4)=56 + M*N*8 + 960 + 16 + 16, ardindan govde. 192 bit AXI-S, beat'ler art arda,
     // son beat'te kismi tkeep. Hepsi little-endian.
     //   Govde: 56 B baslik | M*N*8 B ornek (ornek-ana: n -> m -> I,Q; her biri int32) | 960 B GAC SCIT | 16 B SHOB SCIT | 16 B reserved
-    //   Baslik (VARSAYIM, ICD'de ayrintisi yok): 0 huzme_id(4) | 4 durum(2) | 6 M(2) | 8 darbe(4) | 12 ornek(4) | 16 N(4) | 20 shob_no(1) | 21.. sifir
+    //   Baslik (ICD "SHOB-1 HUZME VERISI & SCIT" tablosu; SHOB-2 icin ayni): 0 huzme_id(4) | 4 durum(2) | 6 M(2) | 8 darbe(4) | 12 ornek(4)
+    //     | 16 reserved(8, sifir) | 24 GAC 1-30 kullanim(4) | 28 GAC 31-60(4) | 32 GAC 61-90(4) | 36 GAC 91-120(4)   (HUZPAR'daki maskelerle ayni)
+    //     | 40 HI kullanim(1: bit0 HI-1, bit1 HI-2, bit2 HI-3; HUZPAR kart kullanim durumunun bit1..3'u) | 41 reserved(15, sifir)
     //   Ornek deseni (kendini tarif eder): kod = ((m+1)<<15) | (n & 7FFF); I = +carpan*kod, Q = -carpan*kod (int32)
     //     carpan: shob_1 icin 1, shob_2 icin 2 (SIFPGA toplarsa RSI'de 3*kod beklenir)
     //   N = darbe * ornek (huzme basina ornek sayisi), m = 0..M-1
@@ -652,6 +654,11 @@ module aurora_64b66b_vip #(
     reg [31:0] dq_darbe [0:DQ_DEPTH-1];
     reg [31:0] dq_ornek [0:DQ_DEPTH-1];
     reg [15:0] dq_durum [0:DQ_DEPTH-1];
+    reg [31:0] dq_g0    [0:DQ_DEPTH-1];     // GAC 1-30 kullanim durumu (HUZPAR'dan)
+    reg [31:0] dq_g1    [0:DQ_DEPTH-1];
+    reg [31:0] dq_g2    [0:DQ_DEPTH-1];
+    reg [31:0] dq_g3    [0:DQ_DEPTH-1];
+    reg [7:0]  dq_kart  [0:DQ_DEPTH-1];     // SHOB kart kullanim durumu (HUZPAR'dan)
     reg [63:0] dq_t     [0:DQ_DEPTH-1];
     integer dq_wr = 0;
     integer dq_rd = 0;
@@ -685,6 +692,11 @@ module aurora_64b66b_vip #(
                     dq_darbe[dq_slot] = h_darbe;
                     dq_ornek[dq_slot] = h_ornek;
                     dq_durum[dq_slot] = h_durum;
+                    dq_g0[dq_slot]    = h_m0;
+                    dq_g1[dq_slot]    = h_m1;
+                    dq_g2[dq_slot]    = h_m2;
+                    dq_g3[dq_slot]    = h_m3;
+                    dq_kart[dq_slot]  = h_kart;
                     dq_t[dq_slot]     = $time;
                     dq_wr = dq_wr + 1;
                 end
@@ -695,6 +707,8 @@ module aurora_64b66b_vip #(
     // aktif mesajin parametreleri
     reg [31:0] d_id, d_m, d_darbe, d_ornek, d_n, d_len;
     reg [15:0] d_durum;
+    reg [31:0] d_g0, d_g1, d_g2, d_g3;
+    reg [7:0]  d_hi;
     integer    d_samp_bytes;
     integer    d_total, d_beats, d_b, d_j, d_p, d_slot2;
     reg [31:0] d_code, d_val, d_s, d_nn, d_mm;
@@ -722,9 +736,12 @@ module aurora_64b66b_vip #(
                     6,7:         begin v = d_m;     d_byte = v >> (8 * (hp - 6)); end
                     8,9,10,11:   begin v = d_darbe; d_byte = v >> (8 * (hp - 8)); end
                     12,13,14,15: begin v = d_ornek; d_byte = v >> (8 * (hp - 12)); end
-                    16,17,18,19: begin v = d_n;     d_byte = v >> (8 * (hp - 16)); end
-                    20:          d_byte = DMUL;
-                    default:     d_byte = 8'h00;
+                    24,25,26,27: begin v = d_g0;    d_byte = v >> (8 * (hp - 24)); end
+                    28,29,30,31: begin v = d_g1;    d_byte = v >> (8 * (hp - 28)); end
+                    32,33,34,35: begin v = d_g2;    d_byte = v >> (8 * (hp - 32)); end
+                    36,37,38,39: begin v = d_g3;    d_byte = v >> (8 * (hp - 36)); end
+                    40:          d_byte = d_hi;
+                    default:     d_byte = 8'h00;     // 16..23 ve 41..55 reserved
                 endcase
             end else begin
                 q = p - 64;
@@ -751,6 +768,8 @@ module aurora_64b66b_vip #(
                 while ($time < d_wait_until) @(posedge clk);
                 d_id = dq_id[d_slot2]; d_m = dq_m[d_slot2]; d_darbe = dq_darbe[d_slot2];
                 d_ornek = dq_ornek[d_slot2]; d_durum = dq_durum[d_slot2];
+                d_g0 = dq_g0[d_slot2]; d_g1 = dq_g1[d_slot2]; d_g2 = dq_g2[d_slot2]; d_g3 = dq_g3[d_slot2];
+                d_hi = (dq_kart[d_slot2] >> 1) & 8'h07;     // kart bit1..3 (HI-1..3) -> HI kullanim bit0..2
                 dq_rd = dq_rd + 1;
                 d_n = d_darbe * d_ornek;
                 d_samp_bytes = d_m * d_n * 8;

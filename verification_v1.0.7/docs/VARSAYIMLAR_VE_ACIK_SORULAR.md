@@ -7,7 +7,7 @@ ICD'de olmayan ya da doğrulanmamış her şey burada. **Kod bu varsayımlarla �
 | # | Konu | Varsayım | Yanlışsa nerede değişir |
 |---|---|---|---|
 | V1 | Hüzme verisi mesajı | ID `00000002`, `LEN = 56 + M·N·8 + 960 + 16 + 16`, CPI başına **tek mesaj** | `aurora_64b66b_vip.v` (gönderici bölümü) |
-| V2 | Başlık düzeni (56 B) | huzme ID, durum, M, darbe, örnek, N, shob_no, sıfır | `d_byte` fonksiyonu |
+| V2 | Başlık düzeni (56 B) | **ICD tablosuyla doğrulandı** (huzme ID, durum, M, darbe, örnek, reserved, 4 GAÇ maskesi, HI kullanım); GAÇ/HI değerleri HUZPAR'dan kopyalanır | `d_byte` fonksiyonu |
 | V3 | Örnek sırası | örnek-ana (`n → m → I, Q`), `int32` I/Q | `d_byte` fonksiyonu |
 | V4 | N | `darbe × örnek` (toplantıda doğrulandı) | `track_cfg_msgs`, gönderici |
 | V5 | Tetik | `0000E001` + sabit gecikme (625 clk = 5 µs), kuyruklu; HB SHOB'a verilmez | `DATA_DELAY_CLKS` |
@@ -30,7 +30,7 @@ ICD'de olmayan ya da doğrulanmamış her şey burada. **Kod bu varsayımlarla �
 3. **Birleştirme gerçekten toplama mı?** Değilse (ör. her SHOB farklı hüzmeler) RSİ modeli "carpan=1/2" raporlar; hangisinin doğru olduğuna siz karar verirsiniz.
 4. **RSİ modelini Top'a ekleme:** `pcie_ip_rsi1..3` yanına SIM_MODE bloğu (şablon: `docs/sim_model_rsi_inst.vhd`). `pcie_ip_rsi1` port listesi
    `pcie_ip_rsy` ile aynı mı? (Şablon aynı varsayar.)
-5. **Hüzme verisi mesajının başlık düzeni** (V2) ve **örnek sırası** (V3) için gerçek tanım var mı?
+5. ~~Hüzme verisi başlık düzeni ve örnek sırası~~: ICD tablosundan doğrulandı (başlık + örnek-ana, `int32` I/Q).
 6. **MSI7 (`0x40`)** ICD'de yok; "adres atama sonrası" kesmesi olarak etiketlendi. Doğru mu?
 7. **Süreler:** gerçek HB periyodu, post-CPI penceresi. Senaryoda `--period-ns` ile ayarlanır (varsayılan 60 µs).
 8. **Hata enjeksiyonu (MSI3/MSI4)** ve **RSY ek kesmeleri / `1DEA001B`:** ertelendi; ne zaman istenirse eklenir.

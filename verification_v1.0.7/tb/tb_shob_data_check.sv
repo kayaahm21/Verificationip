@@ -6,7 +6,7 @@
 // Iki SHOB VIP (shob_1 -> carpan 1, shob_2 -> carpan 2) ayni HUZPAR akisini (0000E001) alir; her HUZPAR icin
 // ~5 us sonra m_axi_rx_* (192 bit) uzerinden huzme verisi mesaji beklenir. Kontroller:
 //   S1  Iki mesaj (iki HUZPAR) sirayla gelir (kuyruk), mesaj ID = 00000002, LEN = 56 + M*N*8 + 992
-//   S2  Govde: baslik alanlari (huzme_id, durum, M, darbe, ornek, N, shob_no), her ornek desene uyar
+//   S2  Govde: baslik (ICD tablosu: huzme_id, durum, M, darbe, ornek, 16..23 reserved, 4 GAC maskesi, HI kullanim), her ornek desene uyar
 //       (I = +k*kod, Q = -k*kod; kod = ((m+1)<<15) | (n & 7FFF); ornek-ana: n -> m)
 //   S3  beat sayisi ve tkeep: son beat disindakiler 24 bayt, son beat kismi (mesaj boyu 24'un kati degil)
 //   S4  kuyruk: ikinci HUZPAR, birinci veri gonderimi sirasinda gelir; mesajlar karismaz
@@ -16,7 +16,8 @@ module rx_checker #(
     parameter MUL = 1,
     parameter NMSG = 2,
     parameter [31:0] ID0 = 32'h0000AB12, parameter [15:0] M0 = 4, parameter [31:0] D0 = 2, parameter [31:0] O0 = 4,
-    parameter [31:0] ID1 = 32'h0000CD34, parameter [15:0] M1 = 8, parameter [31:0] D1 = 3, parameter [31:0] O1 = 4
+    parameter [31:0] ID1 = 32'h0000CD34, parameter [15:0] M1 = 8, parameter [31:0] D1 = 3, parameter [31:0] O1 = 4,
+    parameter [7:0] K0 = 8'h01, parameter [7:0] K1 = 8'h07      // HUZPAR kart kullanim durumu (HI kullanim = K >> 1)
 )(
     input wire         clk,
     input wire         valid,
@@ -71,9 +72,13 @@ module rx_checker #(
                 r16 = {rb[15], rb[14]};                 if (r16 !== em[15:0]) bad("baslik M");
                 r32 = {rb[19], rb[18], rb[17], rb[16]}; if (r32 !== ed) bad("baslik darbe");
                 r32 = {rb[23], rb[22], rb[21], rb[20]}; if (r32 !== eo) bad("baslik ornek");
-                r32 = {rb[27], rb[26], rb[25], rb[24]}; if (r32 !== en) bad("baslik N");
-                if (rb[28] !== MUL[7:0]) bad("baslik shob_no/carpan");
-                for (i = 29; i < 64; i = i + 1) if (rb[i] !== 8'h00) bad("baslik reserved sifir degil");
+                for (i = 24; i < 32; i = i + 1) if (rb[i] !== 8'h00) bad("baslik 16..23 reserved sifir degil");
+                for (i = 32; i < 48; i = i + 4) begin
+                    r32 = {rb[i+3], rb[i+2], rb[i+1], rb[i]};
+                    if (r32 !== 32'h3FFFFFFF) bad("baslik GAC kullanim durumu 3FFFFFFF degil");
+                end
+                if (rb[48] !== (((nmsg == 0 ? K0 : K1) >> 1) & 8'h07)) bad("baslik HI kullanim durumu");
+                for (i = 49; i < 64; i = i + 1) if (rb[i] !== 8'h00) bad("baslik 41..55 reserved sifir degil");
                 // ornekler
                 for (i = 0; i < em * en; i = i + 1) begin
                     nn = i / em; mm = i - nn * em;
@@ -175,13 +180,13 @@ module tb_shob_data_check;
             tb_n = 0;
         end
     endtask
-    task put_huzpar(input [31:0] hid, input [15:0] nb, input [31:0] darbe, input [31:0] ornek);
+    task put_huzpar(input [31:0] hid, input [15:0] nb, input [31:0] darbe, input [31:0] ornek, input [7:0] kart);
         integer r;
         begin
             put32(32'h0000E001); put32(32'd56 + nb * 1920);
             put32(hid); put16(16'd1); put16(nb); put32(darbe); put32(ornek);
             put32(32'h3FFFFFFF); put32(32'h3FFFFFFF); put32(32'h3FFFFFFF); put32(32'h3FFFFFFF);
-            put8(8'h01); put8(8'h00);
+            put8(kart); put8(8'h00);
             for (r = 0; r < 22; r = r + 1) put8(8'h00);
             for (r = 0; r < nb * 1920; r = r + 1) put8(8'h00);
         end
@@ -218,11 +223,11 @@ module tb_shob_data_check;
     initial begin
         wait (cu1 && cu2);
         repeat (20) @(negedge uclk1);
-        put_huzpar(32'h0000AB12, 16'd4, 32'd2, 32'd4);    // N=8 : 1312 bayt, 55 beat, son beat 16 bayt
+        put_huzpar(32'h0000AB12, 16'd4, 32'd2, 32'd4, 8'h01);    // N=8 : 1312 bayt, 55 beat, son beat 16 bayt
         send_msg16;
-        put_huzpar(32'h0000CD34, 16'd8, 32'd3, 32'd4);    // N=12: 56+8*12*8+992 = 1816 -> mesaj 1824 bayt = 76 beat tam
+        put_huzpar(32'h0000CD34, 16'd8, 32'd3, 32'd4, 8'h07);    // N=12: 56+8*12*8+992 = 1816 -> mesaj 1824 bayt = 76 beat tam
         send_msg16;
-        put_huzpar(32'h0000EF56, 16'd4, 32'd0, 32'd4);    // darbe=0: veri yok
+        put_huzpar(32'h0000EF56, 16'd4, 32'd0, 32'd4, 8'h01);    // darbe=0: veri yok
         send_msg16;
         repeat (3000) @(negedge uclk1);
 
