@@ -666,7 +666,8 @@ module aurora_64b66b_vip #(
     reg [63:0] hb_t [0:HBQ-1];
     integer    hb_wr = 0;
     integer    hb_rd = 0;
-    reg        hb_prev = 1'bx;
+    reg        hb_prev  = 1'b0;      // onceki 0/1 degeri (IP Packager 'x' baslangic degerini desteklemez, bu yuzden ayri bayrak)
+    reg        hb_known = 1'b0;      // 1: hb_prev gecerli (huzme_basi en son 0 ya da 1 gordu)
     wire       hb_conn_now = (huzme_basi === 1'b0) || (huzme_basi === 1'b1);   // 0/1 ise baglı; Z/X ise baglanmamis
 
     task hb_event;
@@ -682,12 +683,19 @@ module aurora_64b66b_vip #(
     endtask
 
     always @(huzme_basi) begin
-        if (HB_ACTIVE_HIGH != 0) begin
-            if (hb_prev === 1'b0 && huzme_basi === 1'b1) hb_event;
-        end else begin
-            if (hb_prev === 1'b1 && huzme_basi === 1'b0) hb_event;
+        if (hb_known) begin
+            if (HB_ACTIVE_HIGH != 0) begin
+                if (hb_prev == 1'b0 && huzme_basi === 1'b1) hb_event;
+            end else begin
+                if (hb_prev == 1'b1 && huzme_basi === 1'b0) hb_event;
+            end
         end
-        hb_prev = huzme_basi;
+        if (huzme_basi === 1'b0 || huzme_basi === 1'b1) begin
+            hb_prev  = huzme_basi;
+            hb_known = 1'b1;
+        end else begin
+            hb_known = 1'b0;              // Z/X: onceki deger gecersiz, sonraki 0/1 gecisi HB sayilmaz
+        end
     end
 
     reg [31:0] dq_id    [0:DQ_DEPTH-1];
