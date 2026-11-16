@@ -66,3 +66,10 @@ v1.0.7'nin ilk halinde RSİ durumu `cpu_pkg.sv` içindeydi ve Vivado xsim 2020.2
 
 Önceki halde başlıkta 16–23'e N ve SHOB numarası yazıyordum, GAÇ maskeleri ve HI kullanım sıfırdı. ICD tablosuna göre: 16–23 reserved, 24–39
 GAÇ kullanım durumları (HUZPAR'daki dört maske), 40 HI kullanım (HUZPAR kart durumunun bit1..3'ü), 41–55 reserved. Bkz. `docs/SHOB_HUZME_VERISI.md`.
+
+## SHOB VIP'e HB girişi: veri HB'yi bekler
+
+`aurora_64b66b_vip`'e `huzme_basi` girişi eklendi (gerçek IP'de yok, yalnızca VIP). Hüzme verisi artık HUZPAR'dan **sonra gelen ilk HB'yi** bekler ve HB'den
+5 µs sonra basılır (tasarımcının anlattığı akış). Yeni parametreler: `DATA_TRIGGER` (0 otomatik, 1 hep HB, 2 hep HUZPAR + gecikme), `HB_ACTIVE_HIGH`.
+`huzme_basi` bağlı değilse (Z) eski davranış (HUZPAR + gecikme) sürer. **Port eklendiği için BD/sarmalayıcıda yeniden bağlantı gerekir.** Ayrıntı:
+`docs/SHOB_HUZME_VERISI.md`.

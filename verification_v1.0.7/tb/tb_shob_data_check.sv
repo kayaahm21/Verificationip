@@ -11,6 +11,10 @@
 //   S3  beat sayisi ve tkeep: son beat disindakiler 24 bayt, son beat kismi (mesaj boyu 24'un kati degil)
 //   S4  kuyruk: ikinci HUZPAR, birinci veri gonderimi sirasinda gelir; mesajlar karismaz
 //   S5  darbe=0 olan HUZPAR icin veri gonderilmez (atlandi)
+//   S6  HB girisi (shob_1'de baglı): veri HUZPAR'dan SONRA gelen ilk HB'yi bekler; HUZPAR'dan ONCE olan HB sayilmaz;
+//       veri HB'den 5 us sonra baslar; bir HB tek mesaja yeter (2. mesaj 2. HB'yi bekler)
+//   S7  DATA_TRIGGER=2 (shob_2) eski davranis: HUZPAR + 5 us. NOT: bagli olmayan girisin Z olmasina dayanan otomatik algilama (DATA_TRIGGER=0)
+//       bu simulatorde test edilemez (bagli olmayan girisi 0 sayar); xsim'de baglanmayan giris Z'dir.
 // =====================================================================
 module rx_checker #(
     parameter MUL = 1,
@@ -26,6 +30,7 @@ module rx_checker #(
     input wire         last
 );
     reg [7:0] rb [0:65535];
+    reg [63:0] tstart [0:3];    // mesajlarin ilk beat zamani (ns)
     integer   n = 0;            // bu mesajdaki bayt
     integer   beats = 0;
     integer   nmsg = 0;
@@ -46,6 +51,7 @@ module rx_checker #(
 
     always @(posedge clk) begin
         if (valid) begin
+            if (n == 0 && nmsg < 4) tstart[nmsg] = $time;
             // son beat disinda tkeep tam olmali
             if (!last && keep !== 24'hFFFFFF) bad("son olmayan beat'te tkeep tam degil");
             for (j = 0; j < 24; j = j + 1)
@@ -111,6 +117,7 @@ module tb_shob_data_check;
     reg          tx_tlast = 1'b0, tx_tvalid = 1'b0;
     wire         tx_tready1, tx_tready2;
     reg          refclk = 1'b0;
+    reg          hb = 1'b0;        // shob_1'in huzme_basi girisi (shob_2'ye BAGLANMAZ)
     always #2 refclk = ~refclk;
 
     wire         uclk1, uclk2, cu1, cu2;
@@ -140,11 +147,12 @@ module tb_shob_data_check;
 
     aurora_64b66b_vip #(.UNIT_NAME("shob_1")) dut1 (
         `SHOB_PORTS(1, tx_tready1, rx_d1, rx_k1, rx_l1, rx_v1),
+        .huzme_basi(hb),
         .m_axi_ufc_rx_tdata(ufc_rx_d1), .m_axi_ufc_rx_tkeep(ufc_rx_k1), .m_axi_ufc_rx_tlast(ufc_rx_l1),
         .m_axi_ufc_rx_tvalid(ufc_rx_v1), .ufc_in_progress(),
         .channel_up(cu1), .lane_up(), .user_clk_out(uclk1)
     );
-    aurora_64b66b_vip #(.UNIT_NAME("shob_2")) dut2 (
+    aurora_64b66b_vip #(.UNIT_NAME("shob_2"), .DATA_TRIGGER(2)) dut2 (
         `SHOB_PORTS(2, tx_tready2, rx_d2, rx_k2, rx_l2, rx_v2),
         .m_axi_ufc_rx_tdata(ufc_rx_d2), .m_axi_ufc_rx_tkeep(ufc_rx_k2), .m_axi_ufc_rx_tlast(ufc_rx_l2),
         .m_axi_ufc_rx_tvalid(ufc_rx_v2), .ufc_in_progress(),
@@ -220,8 +228,20 @@ module tb_shob_data_check;
         end
     endfunction
 
+    // 1 clock'luk HB darbesi (CPU VIP'in uretimi gibi)
+    task pulse_hb;
+        begin
+            @(negedge uclk1); hb = 1'b1;
+            @(negedge uclk1); hb = 1'b0;
+        end
+    endtask
+
+    reg [63:0] t_hb1, t_hb2;
+
     initial begin
         wait (cu1 && cu2);
+        repeat (20) @(negedge uclk1);
+        pulse_hb;                                          // HB0: HUZPAR'dan ONCE, sayilmamali
         repeat (20) @(negedge uclk1);
         put_huzpar(32'h0000AB12, 16'd4, 32'd2, 32'd4, 8'h01);    // N=8 : 1312 bayt, 55 beat, son beat 16 bayt
         send_msg16;
@@ -229,15 +249,30 @@ module tb_shob_data_check;
         send_msg16;
         put_huzpar(32'h0000EF56, 16'd4, 32'd0, 32'd4, 8'h01);    // darbe=0: veri yok
         send_msg16;
-        repeat (3000) @(negedge uclk1);
+        repeat (1500) @(negedge uclk1);                    // ~12 us: shob_2 (HB yok) veriyi basti, shob_1 HB bekliyor
 
-        chk(chk1.nmsg == 2 && chk2.nmsg == 2, "S1 her iki SHOB'ta tam 2 huzme verisi mesaji alindi");
+        chk(chk2.nmsg == 2, "S7 shob_2 (DATA_TRIGGER=2): HUZPAR + 5 us ile 2 mesaj geldi");
+        chk(chk1.nmsg == 0, "S6 shob_1: HB gelmeden (HB0 sayilmadi) veri yok");
+
+        t_hb1 = $time; pulse_hb;                           // HB1 -> mesaj 1
+        repeat (1000) @(negedge uclk1);
+        chk(chk1.nmsg == 1, "S6 shob_1: HB1'den sonra 1. mesaj geldi, 2. mesaj HB2'yi bekliyor");
+        chk(chk1.tstart[0] >= t_hb1 + 5000 && chk1.tstart[0] <= t_hb1 + 5000 + 40, "S6 1. mesaj HB1'den ~5 us sonra basladi");
+
+        t_hb2 = $time; pulse_hb;                           // HB2 -> mesaj 2
+        repeat (1200) @(negedge uclk1);
+        chk(chk1.nmsg == 2, "S6 shob_1: HB2'den sonra 2. mesaj geldi");
+        chk(chk1.tstart[1] >= t_hb2 + 5000 && chk1.tstart[1] <= t_hb2 + 5000 + 40, "S6 2. mesaj HB2'den ~5 us sonra basladi");
+
         chk(chk1.errors == 0, "S2/S3 shob_1 mesajlari (carpan 1) dogru");
         chk(chk2.errors == 0, "S2/S3 shob_2 mesajlari (carpan 2) dogru");
         chk(count_in("aurora_huzme_shob_1.txt", "HUZME_VERI_BASLADI huzme_id=0000ab12 M=4 darbe=2 ornek=4 N=8 carpan=1") == 1, "S4 shob_1 log: 1. mesaj basladi");
         chk(count_in("aurora_huzme_shob_1.txt", "HUZME_VERI_BASLADI huzme_id=0000cd34 M=8 darbe=3 ornek=4 N=12 carpan=1") == 1, "S4 shob_1 log: 2. mesaj basladi");
         chk(count_in("aurora_huzme_shob_2.txt", "N=8 carpan=2") == 1 && count_in("aurora_huzme_shob_2.txt", "N=12 carpan=2") == 1, "S4 shob_2 log: carpan=2");
         chk(count_in("aurora_huzme_shob_1.txt", "HUZME_VERI_ATLANDI huzme_id=0000ef56") == 1, "S5 darbe=0: veri atlandi");
+        chk(count_in("aurora_huzme_shob_1.txt", "HB_ALGILANDI") == 3, "S6 log: 3 HB algilandi (HB0, HB1, HB2)");
+        chk(count_in("aurora_huzme_shob_1.txt", "tetik=HB") == 2, "S6 log: iki mesaj da tetik=HB");
+        chk(count_in("aurora_huzme_shob_2.txt", "tetik=HUZPAR") == 2 && count_in("aurora_huzme_shob_2.txt", "HB_ALGILANDI") == 0, "S7 shob_2: tetik=HUZPAR, HB algilanmadi");
 
         if (errors == 0) $display("[TB] *** TUM TESTLER GECTI ***");
         else             $display("[TB] *** %0d HATA ***", errors);

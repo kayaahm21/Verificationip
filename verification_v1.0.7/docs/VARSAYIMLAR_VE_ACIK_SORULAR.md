@@ -10,7 +10,7 @@ ICD'de olmayan ya da doğrulanmamış her şey burada. **Kod bu varsayımlarla �
 | V2 | Başlık düzeni (56 B) | **ICD tablosuyla doğrulandı** (huzme ID, durum, M, darbe, örnek, reserved, 4 GAÇ maskesi, HI kullanım); GAÇ/HI değerleri HUZPAR'dan kopyalanır | `d_byte` fonksiyonu |
 | V3 | Örnek sırası | örnek-ana (`n → m → I, Q`), `int32` I/Q | `d_byte` fonksiyonu |
 | V4 | N | `darbe × örnek` (toplantıda doğrulandı) | `track_cfg_msgs`, gönderici |
-| V5 | Tetik | `0000E001` + sabit gecikme (625 clk = 5 µs), kuyruklu; HB SHOB'a verilmez | `DATA_DELAY_CLKS` |
+| V5 | Tetik | HUZPAR'dan sonraki ilk HB + `DATA_DELAY_CLKS` (5 µs), kuyruklu; `huzme_basi` bağlı değilse HUZPAR + gecikme | `DATA_TRIGGER`, `DATA_DELAY_CLKS` |
 | V6 | Birleştirme | SİFPGA iki SHOB'u **toplar** (RSİ'de `3·kod`); RSİ modeli 1/2/3 çarpanını otomatik bulur ve raporlar | RSİ modeli otomatik uyum sağlar |
 | V7 | RSİ veri biçimi | `float32` I, sonra Q; değerler tamsayı değerli (düz `float(x)`) | `f32_to_int` (`sim_model_rsi.sv`) |
 | V8 | RSİ belleği | seyrek, dairesel değil, pointer/BAR yok; her MSI1/MSI2'de dök + sil | — |

@@ -3,17 +3,49 @@
 `aurora_64b66b_vip` (SHOB-1 ve SHOB-2 için aynı modül) hüzme verisini SİFPGA'ya **`m_axi_rx_*`** (192 bit, `tready` yok)
 üzerinden basar.
 
-## Ne zaman gönderir?
+## Ne zaman gönderir? (HB'ye göre)
 
-SHOB VIP, FPGA'dan gelen her **`0000E001` (HUZPAR ve KATSAYILAR)** mesajını zaten çözüyordu. v1.0.7'de çözülen
-her HUZPAR **bir kuyruğa** (derinlik 8) konur ve **`DATA_DELAY_CLKS` (625 clk = 5 µs) sonra** o hüzparın hüzme verisi gönderilir.
+SHOB VIP, FPGA'dan gelen her **`0000E001` (HUZPAR ve KATSAYILAR)** mesajını çözüp bir **kuyruğa** (derinlik 8) koyar. Veri, HUZPAR'dan **sonra gelen
+ilk hüzme başını (HB) bekleyerek** gönderilir; HB'den `DATA_DELAY_CLKS` (625 clk = 5 µs) sonra başlar.
 
-- HB, SHOB VIP'e verilmediği için tetik **HUZPAR + sabit gecikmedir** (gerçek sistemde HB'den sonra, post-CPI süresinde gider).
-- Kuyruk sayesinde bir tur sürerken yeni HUZPAR gelirse (HB'ler arasında yeni hüzparlar gelir) mesajlar **sırayla** ve
-  karışmadan gider; her mesaj kendi HUZPAR'ının parametreleriyle üretilir.
-- `darbe = 0` ya da `M = 0` ise veri gönderilmez (`HUZME_VERI_ATLANDI`). Mesaj `DATA_MAX_BYTES` (32 MiB) sınırını
-  aşıyorsa (ör. Bypass, M=960 ve büyük N) yine atlanır.
-- Link (`channel_up`) kalkmadan veri gönderilmez.
+**Kurallar:**
+
+- **HUZPAR'dan önce olmuş HB sayılmaz.** Yalnızca HUZPAR çözüldükten sonraki HB'ler tetikler.
+- **Bir HB tek mesaja yeter.** İkinci HUZPAR (kuyrukta) ikinci HB'yi bekler; mesajlar sırayla ve karışmadan gider.
+- `darbe = 0` ya da `M = 0` olan HUZPAR için veri gönderilmez (`HUZME_VERI_ATLANDI`), HB beklenmeden hemen atlanır. Mesaj `DATA_MAX_BYTES` (32 MiB)
+  sınırını aşıyorsa yine atlanır. Link (`channel_up`) kalkmadan veri gönderilmez.
+- Çok turlu senaryoda tur *k*'nın HUZPAR'ı HB*k*'dan önce gelir, verisi HB*k*'dan sonra gider (gerçek akışla aynı). **Son turun verisi için son HB'den
+  sonra simülasyonun biraz daha koşması gerekir** (HB + 5 µs + mesaj süresi).
+
+### HB girişi (`huzme_basi`)
+
+Gerçek Aurora IP'sinde HB girişi **yoktur**; bu giriş yalnızca VIP'e aittir. `PcieTop`/BD'de tasarımın HB hattına bağlanır (CPU VIP'in ürettiği HB ya da
+gerçek HB). Darbenin pasiften aktife geçişi (kenar) algılanır, genişliği önemli değildir (1 clock yeter). `HB_ACTIVE_HIGH` ile polarite seçilir.
+
+| `DATA_TRIGGER` | Davranış |
+|---|---|
+| **0 (varsayılan)** | `huzme_basi` bağlıysa (0/1 görüyorsa) HB'yi bekler; **bağlı değilse (Z)** eski davranış: HUZPAR + `DATA_DELAY_CLKS` |
+| 1 | Her zaman HB'yi bekler. Bağlı değilse veri hiç gönderilmez |
+| 2 | Her zaman HUZPAR + gecikme (v1.0.7'nin ilk hali), `huzme_basi` yok sayılır |
+
+> **Dikkat:** `huzme_basi`'ya **sabit `'0'` bağlamayın**. Bağlı sayılır ve HB hiç gelmediği için veri hiç gönderilmez. HB'yi bağlamayacaksanız
+> `DATA_TRIGGER => 2` verin. Verilator bağlanmayan girişi 0 sayar (xsim'de Z), bu yüzden Verilator testinde eski davranış `DATA_TRIGGER=2` ile seçilir.
+
+**VHDL'de bağlantı örneği** (Aurora sarmalayıcısında ya da BD'de; sinyal adı sizin tasarımdaki HB hattı):
+
+```vhdl
+inst_aurora_shob_1 : entity xil_defaultlib.aurora_64b66b_vip
+    -- GENERIC MAP (DATA_TRIGGER => 0, HB_ACTIVE_HIGH => 1)
+    PORT MAP (
+        ... mevcut portlar ...,
+        huzme_basi => HuzmeBasi        -- SHOB-1 ve SHOB-2 örnekleri aynı HB'ye bağlanır
+    );
+```
+
+> VHDL'den örneklerken yeni portu **mutlaka eşleyin**. Eşlenmeyen bir Verilog girişi xsim'de `formal port has no actual or default value`
+> hatası verebilir. BD'de modül referansı yeniden paketlendiğinde yeni port görünür, HB hattına bağlayın.
+
+**Log:** `aurora_huzme_<UNIT>.txt` içinde `HB_ALGILANDI`, `HUZME_VERI_BEKLIYOR` (HB modunda kuyruğa girince), `HUZME_VERI_BASLADI ... tetik=HB|HUZPAR`.
 
 ## Mesaj biçimi (192 bit AXI-S)
 
@@ -74,7 +106,9 @@ kendisi bulur ve raporlar (bkz. `RSI_MODELI.md`).
 | Parametre | Varsayılan | Anlamı |
 |---|---|---|
 | `DATA_ENABLE` | 1 | 0 → veri gönderme (v1.0.5 davranışı) |
-| `DATA_DELAY_CLKS` | 625 | HUZPAR'dan veri başlangıcına bekleme (user_clk, 125 MHz → 5 µs) |
+| `DATA_DELAY_CLKS` | 625 | Tetikten (HB ya da HUZPAR) veri başlangıcına bekleme (user_clk, 125 MHz → 5 µs) |
+| `DATA_TRIGGER` | 0 | 0 otomatik, 1 hep HB, 2 hep HUZPAR + gecikme (yukarıdaki tablo) |
+| `HB_ACTIVE_HIGH` | 1 | `huzme_basi` polaritesi |
 | `DATA_MUL` | 0 | desen çarpanı; 0 → `UNIT_NAME == "shob_2"` ise 2, yoksa 1 |
 | `DATA_MAX_BYTES` | 33554432 | bundan büyük mesaj atlanır |
 

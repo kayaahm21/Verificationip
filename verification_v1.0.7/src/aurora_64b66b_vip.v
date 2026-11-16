@@ -51,7 +51,9 @@ module aurora_64b66b_vip #(
     parameter LOG_DATA_BYTES   = 64,       // obs'taki MSG satirina yazilan en fazla veri bayti
     // ---- v1.0.7: huzme verisi (ID 00000002, SHOB -> SIFPGA) gonderimi, m_axi_rx_* uzerinden (192 bit) ----
     parameter DATA_ENABLE      = 1,        // 0: huzme verisi gonderme (v1.0.5 davranisi)
-    parameter DATA_DELAY_CLKS  = 625,      // HUZPAR (0000E001) alindiktan sonra veri gonderiminin baslamasina kadar bekleme (625 clk = 5 us)
+    parameter DATA_DELAY_CLKS  = 625,      // tetikten (HB ya da HUZPAR, asagiya bak) veri gonderiminin baslamasina kadar bekleme (625 clk = 5 us)
+    parameter DATA_TRIGGER     = 0,        // 0: otomatik (huzme_basi baglıysa HB'yi bekler, degilse HUZPAR + gecikme); 1: her zaman HB; 2: her zaman HUZPAR + gecikme (v1.0.7 ilk hali)
+    parameter HB_ACTIVE_HIGH   = 1,        // huzme_basi aktif seviyesi: 1 = aktif-yuksek (darbenin yukselen kenari), 0 = aktif-dusuk
     parameter DATA_MUL         = 0,        // desen carpani: 0 = UNIT_NAME'den (shob_2 -> 2, digerleri 1), >0 elle
     parameter DATA_MAX_BYTES   = 33554432  // bundan buyuk mesaj gonderilmez (ornegin Bypass M=960 ve cok buyuk N)
 )(
@@ -103,6 +105,10 @@ module aurora_64b66b_vip #(
     output wire [0:2]   lane_up,
     output wire         crc_pass_fail_n,
     output wire         crc_valid,
+
+    // ---- v1.0.7: huzme basi (HB) girisi. Gercek Aurora IP'sinde YOKTUR; yalnizca bu VIP'e aittir.
+    //      DATA_TRIGGER=0/1 iken hüzme verisi, HUZPAR'dan SONRA gelen ilk HB'yi bekler. Baglanmazsa (Z) eski davranis. ----
+    input  wire         huzme_basi,
 
     // ---- Sistem arayuzu ----
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 user_clk_out CLK",
@@ -633,7 +639,10 @@ module aurora_64b66b_vip #(
     // =================================================================
     // v1.0.7: HUZME VERISI GONDERICISI (ID 00000002, SHOB -> SIFPGA)
     //
-    // Her HUZPAR (0000E001) icin, DATA_DELAY_CLKS sonra tek bir mesaj gonderilir (kuyruklu: turlar sirayla).
+    // Her HUZPAR (0000E001) icin tek bir mesaj gonderilir (kuyruklu: turlar sirayla). Tetik:
+    //   HB modu (DATA_TRIGGER=1, ya da =0 ve huzme_basi baglıysa): HUZPAR'DAN SONRA gelen ilk HB (bir HB tek mesaja yetmez; sonraki mesaj sonraki HB'yi bekler),
+    //     veri HB'den DATA_DELAY_CLKS sonra baslar. HUZPAR'dan ONCE olmus HB'ler sayilmaz.
+    //   HUZPAR modu (DATA_TRIGGER=2, ya da =0 ve huzme_basi baglı degilse): HUZPAR'dan DATA_DELAY_CLKS sonra (eski davranis).
     // Mesaj: ID(4)=00000002, LEN(4)=56 + M*N*8 + 960 + 16 + 16, ardindan govde. 192 bit AXI-S, beat'ler art arda,
     // son beat'te kismi tkeep. Hepsi little-endian.
     //   Govde: 56 B baslik | M*N*8 B ornek (ornek-ana: n -> m -> I,Q; her biri int32) | 960 B GAC SCIT | 16 B SHOB SCIT | 16 B reserved
@@ -649,6 +658,38 @@ module aurora_64b66b_vip #(
     localparam DATA_TAIL_BYTES = 960 + 16 + 16;
     localparam DMUL = (DATA_MUL != 0) ? DATA_MUL : ((UNIT_NAME == "shob_2") ? 2 : 1);
 
+    integer fdat = 0;
+    reg [8*64-1:0] fname_dat;
+
+    // ---- HB algilama: huzme_basi'nin pasiften aktife gecisi (darbenin kenari) zaman damgasiyla saklanir ----
+    localparam HBQ = 16;
+    reg [63:0] hb_t [0:HBQ-1];
+    integer    hb_wr = 0;
+    integer    hb_rd = 0;
+    reg        hb_prev = 1'bx;
+    wire       hb_conn_now = (huzme_basi === 1'b0) || (huzme_basi === 1'b1);   // 0/1 ise baglı; Z/X ise baglanmamis
+
+    task hb_event;
+        begin
+            hb_t[hb_wr % HBQ] = $time;
+            hb_wr = hb_wr + 1;
+            if (hb_wr - hb_rd > HBQ) hb_rd = hb_wr - HBQ;      // en eski HB'ler dusurulur
+            if (fdat != 0) begin
+                $fdisplay(fdat, "%0d HB_ALGILANDI", $time);
+                $fflush(fdat);
+            end
+        end
+    endtask
+
+    always @(huzme_basi) begin
+        if (HB_ACTIVE_HIGH != 0) begin
+            if (hb_prev === 1'b0 && huzme_basi === 1'b1) hb_event;
+        end else begin
+            if (hb_prev === 1'b1 && huzme_basi === 1'b0) hb_event;
+        end
+        hb_prev = huzme_basi;
+    end
+
     reg [31:0] dq_id    [0:DQ_DEPTH-1];
     reg [31:0] dq_m     [0:DQ_DEPTH-1];
     reg [31:0] dq_darbe [0:DQ_DEPTH-1];
@@ -659,13 +700,12 @@ module aurora_64b66b_vip #(
     reg [31:0] dq_g2    [0:DQ_DEPTH-1];
     reg [31:0] dq_g3    [0:DQ_DEPTH-1];
     reg [7:0]  dq_kart  [0:DQ_DEPTH-1];     // SHOB kart kullanim durumu (HUZPAR'dan)
+    reg        dq_hb    [0:DQ_DEPTH-1];     // 1: bu mesaj icin HB beklenecek
     reg [63:0] dq_t     [0:DQ_DEPTH-1];
     integer dq_wr = 0;
     integer dq_rd = 0;
     integer dq_slot;
 
-    integer fdat = 0;
-    reg [8*64-1:0] fname_dat;
     initial begin
         if (LOG_ENABLE != 0 && DATA_ENABLE != 0) begin
             $sformat(fname_dat, "aurora_huzme_%0s.txt", UNIT_NAME);
@@ -697,6 +737,11 @@ module aurora_64b66b_vip #(
                     dq_g2[dq_slot]    = h_m2;
                     dq_g3[dq_slot]    = h_m3;
                     dq_kart[dq_slot]  = h_kart;
+                    dq_hb[dq_slot]    = (DATA_TRIGGER == 1) || (DATA_TRIGGER == 0 && hb_conn_now);
+                    if (dq_hb[dq_slot] && fdat != 0) begin
+                        $fdisplay(fdat, "%0d HUZME_VERI_BEKLIYOR huzme_id=%h (HB bekleniyor)", $time, h_id);
+                        $fflush(fdat);
+                    end
                     dq_t[dq_slot]     = $time;
                     dq_wr = dq_wr + 1;
                 end
@@ -716,6 +761,8 @@ module aurora_64b66b_vip #(
     reg [191:0] d_data;
     reg [23:0]  d_keep;
     reg [63:0] d_wait_until;
+    reg [63:0] d_arr, d_trig;
+    reg        d_hb_mode, d_found;
 
     // mesajin p. baytini uretir (p = 0: ID'nin ilk baytii)
     function [7:0] d_byte;
@@ -764,12 +811,12 @@ module aurora_64b66b_vip #(
             @(posedge clk);
             if (DATA_ENABLE != 0 && dq_rd != dq_wr && channel_up) begin
                 d_slot2 = dq_rd % DQ_DEPTH;
-                d_wait_until = dq_t[d_slot2] + (DATA_DELAY_CLKS * 8);
-                while ($time < d_wait_until) @(posedge clk);
                 d_id = dq_id[d_slot2]; d_m = dq_m[d_slot2]; d_darbe = dq_darbe[d_slot2];
                 d_ornek = dq_ornek[d_slot2]; d_durum = dq_durum[d_slot2];
                 d_g0 = dq_g0[d_slot2]; d_g1 = dq_g1[d_slot2]; d_g2 = dq_g2[d_slot2]; d_g3 = dq_g3[d_slot2];
                 d_hi = (dq_kart[d_slot2] >> 1) & 8'h07;     // kart bit1..3 (HI-1..3) -> HI kullanim bit0..2
+                d_hb_mode = dq_hb[d_slot2];
+                d_arr = dq_t[d_slot2];
                 dq_rd = dq_rd + 1;
                 d_n = d_darbe * d_ornek;
                 d_samp_bytes = d_m * d_n * 8;
@@ -777,14 +824,33 @@ module aurora_64b66b_vip #(
                 d_total = 8 + d_len;
                 d_beats = (d_total + 23) / 24;
                 if (d_m == 0 || d_n == 0 || (d_m * d_n * 8 + 8 + 56 + DATA_TAIL_BYTES) > DATA_MAX_BYTES) begin
+                    // gonderilmeyecek mesaj HB beklemez
                     if (fdat != 0) begin
                         $fdisplay(fdat, "%0d HUZME_VERI_ATLANDI huzme_id=%h M=%0d N=%0d (bos ya da %0d bayt siniri asildi)", $time, d_id, d_m, d_n, DATA_MAX_BYTES);
                         $fflush(fdat);
                     end
                 end else begin
+                    // ---- tetik: HB ya da HUZPAR ----
+                    if (d_hb_mode) begin
+                        d_found = 1'b0;
+                        while (!d_found) begin
+                            while (hb_rd < hb_wr && hb_t[hb_rd % HBQ] <= d_arr) hb_rd = hb_rd + 1;   // HUZPAR'dan once olan / kullanilmis HB'ler
+                            if (hb_rd < hb_wr) begin
+                                d_trig  = hb_t[hb_rd % HBQ];
+                                hb_rd   = hb_rd + 1;
+                                d_found = 1'b1;
+                            end else begin
+                                @(posedge clk);
+                            end
+                        end
+                    end else begin
+                        d_trig = d_arr;
+                    end
+                    d_wait_until = d_trig + (DATA_DELAY_CLKS * 8);
+                    while ($time < d_wait_until) @(posedge clk);
                     if (fdat != 0) begin
-                        $fdisplay(fdat, "%0d HUZME_VERI_BASLADI huzme_id=%h M=%0d darbe=%0d ornek=%0d N=%0d carpan=%0d mesaj_bayt=%0d len=%0d beat=%0d",
-                                  $time, d_id, d_m, d_darbe, d_ornek, d_n, DMUL, d_total, d_len, d_beats);
+                        $fdisplay(fdat, "%0d HUZME_VERI_BASLADI huzme_id=%h M=%0d darbe=%0d ornek=%0d N=%0d carpan=%0d mesaj_bayt=%0d len=%0d beat=%0d tetik=%0s",
+                                  $time, d_id, d_m, d_darbe, d_ornek, d_n, DMUL, d_total, d_len, d_beats, d_hb_mode ? "HB" : "HUZPAR");
                         $fflush(fdat);
                     end
                     for (d_b = 0; d_b < d_beats; d_b = d_b + 1) begin
