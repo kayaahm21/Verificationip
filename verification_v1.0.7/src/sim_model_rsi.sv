@@ -11,14 +11,18 @@
 //   * RQ MemWr'lari seyrek (sparse) hafizaya yazar (4 baytlik kelime basina bir kayit). Dairesel degil, pointer yok.
 //   * MSI vektoru: bit0 MSI1 (yazildi), bit1 MSI2 (yazilamadi), bit2 MSI3 (SHOB verisi eksik), bit3 MSI4 (SHOB verisi gelmedi).
 //     MSI1 ya da MSI2 bir "tur"u kapatir: hafiza cozulur, dogrulanir, dokulur, temizlenir.
-//   * Veri float32 I/Q cifti (I sonra Q, 8 bayt/ornek). Dogrulama deseni SHOB VIP'in urettigi kendini tarif eden desendir:
-//       kod = ((m+1)<<15) | (n & 0x7FFF), I = +k*kod, Q = -k*kod; birlestirme kurali k otomatik bulunur (3: SHOB-1+SHOB-2 toplami,
-//       1 ya da 2: yalniz bir SHOB). Kural cikti dosyasina yazilir.
-//   * Kontroller (RSI basina): baslangic adresi = RSI baslangic adresi (1DEA0001) + offset (1DEA0003); tum ornekler gecerli desen;
-//     bosluk yok; her huzmede N ornek eksiksiz ve bir kez; huzme sayisi = 1DEA0003'teki RSI'ye indirilecek huzme sayisi.
-//     Turun tum RSI'leri raporlayinca cpu_pkg::rsi_report_round birlesim kontrolu (her huzme 0..M-1 bir kez) yapar.
+//   * SIBFPGA -> RSI mesaj formati (ICD "SHOB HUZME VERISI & SCIT", ID 0x00000002, little-endian):
+//       ID(4) | LEN(4, yalniz veri) | HEADER 88 B | HUZME VERISI M kanal x (N adet I float32 + N adet Q float32) | GAC SCIT 1920 B |
+//       SHOB SCIT 32 B | SIBFPGA SCIT 16 B | FOOTER 16 B (AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD)
+//     HEADER: 0 huzme ID(4) | 4 durum(2) | 6 alma huzme sayisi(2) | 8 darbe(4) | 12 ornek(4) | 16 reserved(8) | 24..52 sekiz GAC maskesi |
+//             56 SHOB-1 kart(1) | 57 SHOB-2 kart(1) | 58 reserved(30).    N = darbe x ornek, K (kanal sayisi) boyuttan hesaplanir.
+//   * Dogrulama deseni SHOB VIP'in urettigi kendini tarif eden desendir: kod = ((m+1)<<15) | (n & 0x7FFF), I = +k*kod, Q = -k*kod;
+//     birlestirme kurali k otomatik bulunur (3: SHOB-1+SHOB-2 toplami, 1 ya da 2: yalniz bir SHOB) ve dosyaya yazilir.
+//   * Kontroller (RSI basina): baslangic adresi = RSI baslangic adresi (1DEA0001) + offset (1DEA0003); ID = 2; LEN = gelen bayt;
+//     header alanlari (huzme ID, darbe, ornek) 1DEA0003 ile ayni; kanal sayisi = 1DEA0003'teki RSI'ye indirilecek huzme sayisi;
+//     her kanalda N ornek desene uyar; FOOTER dogru ve mesajin sonunda. Kural bulunamasa da ilk 32 kelime HAM DOKUM olarak yazilir.
+//     Turun tum RSI'leri raporlayinca rsi_pkg::rsi_report_round birlesim kontrolu (her huzme 0..M-1 bir kez) yapar.
 //   * Cikti: <OUT_PREFIX>_rsi<RSI_ID>.txt ve turlarin ozeti rsi_tur_ozeti.txt (rsi_pkg).
-//   * Veri yerlesimi (huzme-ana mi, ornek-ana mi) otomatik saptanir ve raporlanir.
 // =====================================================================
 module sim_model_rsi #(
     parameter int    RSI_ID           = 1,                 // 1..3
@@ -227,24 +231,44 @@ module sim_model_rsi #(
         return int'(code & 64'h7FFF);
     endfunction
 
-    // anahtarlar (artan adres) modul duzeyinde tutulur
-    bit [63:0]   keys_m [$];
-    int          beam_n_m [int];             // huzme -> ornek sayisi
-    bit          seen_mn_m [bit [63:0]];     // anahtar {huzme, ornek}: goruldu mu
-    int          beam_list_m [$];            // bu turda gorulen huzmeler (artan sirayla degil, ilk gorulme sirasiyla)
+    // ---------------- mesaj duzeni sabitleri (kelime = 4 bayt) ----------------
+    localparam int HDR_WORDS   = 24;     // ID + LEN + HEADER 88 B
+    localparam int GAC_WORDS   = 480;    // GAC SCIT 1920 B
+    localparam int SHOB_WORDS  = 8;      // SHOB SCIT 32 B
+    localparam int SIB_WORDS   = 4;      // SIBFPGA SCIT 16 B
+    localparam int FOOT_WORDS  = 4;      // FOOTER 16 B
+    localparam int TAIL_WORDS  = GAC_WORDS + SHOB_WORDS + SIB_WORDS + FOOT_WORDS;   // 496
 
-    // Verilen carpan k icin kac I/Q cifti gecerli desen? (adres sirasina gore ardisik kelimeler)
+    // modul duzeyinde durum (xsim sadeligi: yerel kuyruk/iliskisel dizi yok; her tur basinda acikca temizlenir)
+    bit [63:0]   keys_m [$];                 // bellekteki kelime anahtarlari (artan adres)
+    bit [63:0]   base_key = 64'd0;           // mesajin ilk kelimesinin anahtari
+    int          kn_K = 0;                   // kanal (huzme) sayisi
+    int          kn_N = 0;                   // kanal basina ornek sayisi
+    int          beam_list_m [$];            // bu turda gorulen huzmeler (ilk gorulme sirasiyla)
+    bit          seen_beam_m [int];          // huzme daha once goruldu mu
+
+    // mesajin i. kelimesi (yoksa 0)
+    function automatic bit [31:0] wd(int i);
+        if (mem.exists(base_key + 64'(i))) return mem[base_key + 64'(i)];
+        else                               return 32'd0;
+    endfunction
+
+    // Verilen carpan k icin kac (kanal, ornek) cifti gecerli desen? I blogu ve Q blogu ayri okunur.
     function automatic int count_valid(int k);
-        int     ok;
-        longint vi, vq;
+        int          ok;
+        longint      vi, vq;
+        bit [31:0]   wi, wq;
         ok = 0;
-        for (int i = 0; i + 1 < keys_m.size(); i += 2) begin
-            if (f32_ok(mem[keys_m[i]]) && f32_ok(mem[keys_m[i+1]])) begin
-                vi = f32_val(mem[keys_m[i]]);
-                vq = f32_val(mem[keys_m[i+1]]);
-                if (vi > 0 && (vi % k) == 0 && vq == -vi && code_ok(vi / k)) ok++;
+        for (int c = 0; c < kn_K; c++)
+            for (int n = 0; n < kn_N; n++) begin
+                wi = wd(HDR_WORDS + c * 2 * kn_N + n);
+                wq = wd(HDR_WORDS + c * 2 * kn_N + kn_N + n);
+                if (f32_ok(wi) && f32_ok(wq)) begin
+                    vi = f32_val(wi);
+                    vq = f32_val(wq);
+                    if (vi > 0 && (vi % k) == 0 && vq == -vi && code_ok(vi / k)) ok++;
+                end
             end
-        end
         return ok;
     endfunction
 
@@ -254,30 +278,35 @@ module sim_model_rsi #(
         else return 2;
     endfunction
 
+    function automatic string wfmt(bit [31:0] w);
+        if (f32_ok(w)) return $sformatf("%h (float=%0d)", w, f32_val(w));
+        else           return $sformatf("%h (float tamsayi degil)", w);
+    endfunction
+
     int round_no = 0;
 
     // ---------------- Turu kapat: coz, dogrula, dok, temizle ----------------
     task automatic process_round(bit basarili);
         bit [63:0]   cur;
-        int          tur, nsamp, npair, errors, warns, i, j;
-        bit          has_t;
+        int          tur, nwords, nbytes, errors, warns, i, j, c, n, tail_w, data_bytes;
+        int          k_best, best_ok, ok_k, npair, nbeams, detail_n, bad_samples, dup_beams, gaps, nk_exp;
+        int          chan_m, mm, dem, nz;
+        bit          has_t, dogru, okf, foot_ok;
         bit [63:0]   start_expected, start_actual;
-        int          k_best, best_ok, ok_k;
-        string       rule;
         longint      vi, vq, code;
-        int          m, n, prev_m, prev_n, nbeams, detail_n, nk_exp, bn;
-        int          dup_samples, gaps, bad_samples, mn_inc_n, mn_inc_m;
-        string       layout, sl;
-        bit          dogru, have_prev;
+        bit [31:0]   id, len, hid, w3, darbe, ornek, wi, wq;
+        int          durum, alma;
+        string       rule, sl;
 
         // yerel olmayan durum: acikca temizle
-        keys_m.delete(); beam_n_m.delete(); seen_mn_m.delete(); beam_list_m.delete();
+        keys_m.delete(); beam_list_m.delete(); seen_beam_m.delete();
+        kn_K = 0; kn_N = 0;
         round_no++;
         tur = rsi_tur_idx[RSI_ID];
         rsi_tur_idx[RSI_ID] = tur + 1;
         has_t = tur_var(tur);
         nk_exp = has_t ? int'(t_nk[RSI_ID][tur]) : 0;
-        errors = 0; warns = 0; bad_samples = 0; dup_samples = 0; gaps = 0;
+        errors = 0; warns = 0; bad_samples = 0; dup_beams = 0; gaps = 0; nbeams = 0; k_best = 0; best_ok = 0;
         logf("");
         logf($sformatf("%0t ===== TUR %0d (MSI%0s) =====", $time, tur + 1, basarili ? "1: yazildi" : "2: YAZILAMADI"));
 
@@ -286,18 +315,20 @@ module sim_model_rsi #(
             keys_m.push_back(cur);
             while (mem.next(cur)) keys_m.push_back(cur);
         end
-        nsamp = keys_m.size();
+        nwords = keys_m.size();
+        nbytes = nwords * 4;
         logf($sformatf("%0t alinan MemWr=%0d, kelime=%0d (%0d bayt), atilan kelime=%0d, kismi be uyarilari=%0d",
-                       $time, wr_count, nsamp, nsamp * 4, dropped, partial_be_warn));
-        if (nsamp == 0) begin
+                       $time, wr_count, nwords, nbytes, dropped, partial_be_warn));
+        if (nwords == 0) begin
             logf($sformatf("%0t HATA bu turda hic veri yazilmamis", $time));
             rsi_report_round(RSI_ID, tur, basarili, 1'b0, 0, 0);
             reset_round();
             return;
         end
+        base_key = keys_m[0];
+        start_actual = base_key << 2;
 
         // ---- beklenen baslangic adresi ----
-        start_actual = keys_m[0] << 2;
         if (has_t && rsi_start_valid) begin
             start_expected = rsi_start_addr[RSI_ID] + t_off[RSI_ID][tur];
             if (start_actual == start_expected)
@@ -309,118 +340,204 @@ module sim_model_rsi #(
                 errors++;
             end
         end else begin
-            logf($sformatf("%0t ADRES kontrolu yapilamadi (1DEA0001/1DEA0003 bu tur icin senaryoda gorulmedi). ilk adres=%h",
+            logf($sformatf("%0t ADRES kontrolu yapilamadi (1DEA0001/1DEA0003 bu tur icin senaryoda gorulmedi; VIP_RSI tanimli mi?). ilk adres=%h",
                            $time, start_actual));
             warns++;
         end
 
-        // ---- cift sayida kelime ve bitisiklik ----
-        if (nsamp % 2 != 0) begin
-            logf($sformatf("%0t HATA kelime sayisi tek (%0d): I/Q ciftleri tamamlanmamis", $time, nsamp));
-            errors++;
-        end
-        for (i = 1; i < nsamp; i++)
+        // ---- bitisiklik ----
+        for (i = 1; i < nwords; i++)
             if (keys_m[i] != keys_m[i-1] + 1) begin
                 gaps++;
                 if (gaps <= 8) logf($sformatf("%0t HATA bosluk: %h sonrasi %h (kelime adresleri)", $time, keys_m[i-1] << 2, keys_m[i] << 2));
             end
         if (gaps != 0) errors++;
 
+        // ---- HAM DOKUM: kural/format bulunamasa da ilk kelimeler her zaman yazilir ----
+        logf($sformatf("%0t HAM DOKUM (ilk %0d kelime: [kelime no] adres hex (float yorumu)):", $time, (nwords < 32) ? nwords : 32));
+        for (i = 0; i < nwords && i < 32; i++)
+            logf($sformatf("  [%0d] %h  %s", i, (base_key + 64'(i)) << 2, wfmt(wd(i))));
+
+        // ---- ID ve LEN ----
+        id  = wd(0);
+        len = wd(1);
+        logf($sformatf("%0t MESAJ: ID=%h LEN=%0d (toplam %0d bayt beklenir, gelen %0d bayt)", $time, id, len, 8 + len, nbytes));
+        if (id != 32'h00000002) begin
+            logf($sformatf("%0t HATA mesaj ID 00000002 olmali, gelen %h", $time, id));
+            errors++;
+        end
+        if (8 + len != nbytes) begin
+            logf($sformatf("%0t HATA LEN uyusmuyor: 8 + LEN = %0d, gelen %0d bayt", $time, 8 + len, nbytes));
+            errors++;
+        end
+
+        // ---- HEADER (88 B): kelime 2..23 ----
+        hid    = wd(2);
+        w3     = wd(3);
+        durum  = int'(w3[15:0]);
+        alma   = int'(w3[31:16]);
+        darbe  = wd(4);
+        ornek  = wd(5);
+        logf($sformatf("%0t HEADER: huzme_id=%h durum=%0d (%0s) alma_huzme=%0d darbe=%0d ornek=%0d (N=%0d)", $time, hid, durum,
+                       (durum == 1) ? "HO" : ((durum == 0) ? "Bypass" : "GECERSIZ"), alma, darbe, ornek, darbe * ornek));
+        sl = "  GAC kullanim maskeleri (1-30,31-60,...,211-240):";
+        for (j = 0; j < 8; j++) sl = {sl, $sformatf(" %h", wd(8 + j))};
+        logf(sl);
+        logf($sformatf("  SHOB-1 kart=%h SHOB-2 kart=%h", wd(16) & 32'hFF, (wd(16) >> 8) & 32'hFF));
+        if (durum != 0 && durum != 1) begin
+            logf($sformatf("%0t HATA durum 0 (Bypass) ya da 1 (HO) olmali", $time));
+            errors++;
+        end
+        nz = 0;
+        if (wd(6) != 0 || wd(7) != 0 || (wd(16) >> 16) != 0) nz = 1;
+        for (j = 17; j < 24; j++) if (wd(j) != 0) nz = 1;
+        if (nz != 0) begin
+            logf($sformatf("%0t UYARI header reserved alani sifir degil", $time));
+            warns++;
+        end
+        for (j = 0; j < 8; j++)
+            if ((wd(8 + j) >> 30) != 0) begin
+                logf($sformatf("%0t UYARI GAC maskesi %0d: bit 30/31 reserved (0 olmali)", $time, j));
+                warns++;
+            end
+        if (has_t) begin
+            if (hid != t_hid[tur]) begin
+                logf($sformatf("%0t HATA huzme ID %h, 1DEA0003'te %h", $time, hid, t_hid[tur]));
+                errors++;
+            end
+            if (darbe != t_darbe[tur] || ornek != t_ornek[tur]) begin
+                logf($sformatf("%0t HATA darbe/ornek (%0d/%0d), 1DEA0003'te (%0d/%0d)", $time, darbe, ornek, t_darbe[tur], t_ornek[tur]));
+                errors++;
+            end
+            if (alma != int'(t_m[tur]) && alma != nk_exp) begin
+                logf($sformatf("%0t UYARI alma huzme sayisi %0d: 1DEA0003 M=%0d, bu RSI icin kanal=%0d (hicbiri degil)", $time, alma, t_m[tur], nk_exp));
+                warns++;
+            end
+        end
+
+        // ---- kanal sayisi: gelen boyuttan ----
+        kn_N = int'(darbe) * int'(ornek);
+        data_bytes = nbytes - (HDR_WORDS + TAIL_WORDS) * 4;
+        if (kn_N <= 0 || data_bytes <= 0 || (data_bytes % (8 * kn_N)) != 0) begin
+            logf($sformatf("%0t HATA kanal sayisi hesaplanamadi: N=%0d, huzme verisi bolumu %0d bayt (8*N*K olmali)", $time, kn_N, data_bytes));
+            errors++;
+            kn_K = 0;
+        end else begin
+            kn_K = data_bytes / (8 * kn_N);
+        end
+        logf($sformatf("%0t KANAL SAYISI K=%0d (beklenen RSI%0d icin %0s), N=%0d", $time, kn_K, RSI_ID,
+                       has_t ? $sformatf("%0d", nk_exp) : "bilinmiyor", kn_N));
+        if (has_t && kn_K != nk_exp) begin
+            logf($sformatf("%0t HATA kanal sayisi beklenenle farkli", $time));
+            errors++;
+        end
+        logf($sformatf("%0t YERLESIM: KANAL-ANA (her kanal icin once N adet I, sonra N adet Q, float32); sonra GAC SCIT, SHOB SCIT, SIBFPGA SCIT, FOOTER", $time));
+
         // ---- birlestirme kurali: k = 3 (toplam), 1, 2 ----
-        npair = nsamp / 2;
-        k_best = 0; best_ok = 0;
-        for (j = 0; j < 3; j++) begin
-            ok_k = count_valid(ks(j));
-            if (ok_k > best_ok) begin best_ok = ok_k; k_best = ks(j); end
-            if (ok_k == npair) begin k_best = ks(j); best_ok = ok_k; break; end
+        npair = kn_K * kn_N;
+        if (kn_K > 0) begin
+            for (j = 0; j < 3; j++) begin
+                ok_k = count_valid(ks(j));
+                if (ok_k > best_ok) begin best_ok = ok_k; k_best = ks(j); end
+                if (ok_k == npair) begin k_best = ks(j); best_ok = ok_k; break; end
+            end
         end
         if (k_best == 3)      rule = "TOPLAM (SHOB-1 + SHOB-2)";
         else if (k_best == 1) rule = "yalniz SHOB-1";
         else if (k_best == 2) rule = "yalniz SHOB-2";
         else                  rule = "TANINMADI";
         logf($sformatf("%0t BIRLESTIRME KURALI: %s (carpan=%0d); gecerli ornek=%0d/%0d", $time, rule, k_best, best_ok, npair));
-        if (k_best == 0) errors++;
-        else if (best_ok != npair) errors++;
+        if (kn_K > 0) begin
+            if (k_best == 0) errors++;
+            else if (best_ok != npair) errors++;
+        end
         if (k_best != 0 && k_best != 3)
             logf($sformatf("%0t UYARI: carpan 3 (toplam) bekleniyordu, %0d bulundu", $time, k_best));
 
-        // ---- ornek ornek coz: huzme/ornek kapsami, yerlesim ----
-        mn_inc_n = 0; mn_inc_m = 0; have_prev = 1'b0; prev_m = 0; prev_n = 0; detail_n = 0;
-        for (i = 0; k_best != 0 && i + 1 < nsamp; i += 2) begin
-            vi = 0; vq = 0;
-            if (f32_ok(mem[keys_m[i]]) && f32_ok(mem[keys_m[i+1]])) begin
-                vi = f32_val(mem[keys_m[i]]);
-                vq = f32_val(mem[keys_m[i+1]]);
-            end
-            if (vi > 0 && (vi % k_best) == 0 && vq == -vi && code_ok(vi / k_best)) begin
-                code = vi / k_best;
-                m = code_m(code);
-                n = code_n(code);
-                if (seen_mn_m.exists({32'(m), 32'(n)})) dup_samples++;
-                seen_mn_m[{32'(m), 32'(n)}] = 1'b1;
-                if (beam_n_m.exists(m)) beam_n_m[m] = beam_n_m[m] + 1;
-                else begin beam_n_m[m] = 1; beam_list_m.push_back(m); end
-                if (have_prev) begin
-                    if (m == prev_m && n == prev_n + 1) mn_inc_n++;
-                    else if (n == prev_n && m == prev_m + 1) mn_inc_m++;
+        // ---- kanal kanal coz: her kanalda N ornek, ayni huzme, ornek sirasi 0..N-1 ----
+        detail_n = 0;
+        for (c = 0; c < kn_K && k_best != 0; c++) begin
+            chan_m = -1;
+            for (n = 0; n < kn_N; n++) begin
+                wi = wd(HDR_WORDS + c * 2 * kn_N + n);
+                wq = wd(HDR_WORDS + c * 2 * kn_N + kn_N + n);
+                okf = 1'b0;
+                vi = 0; vq = 0;
+                if (f32_ok(wi) && f32_ok(wq)) begin
+                    vi = f32_val(wi);
+                    vq = f32_val(wq);
+                    okf = (vi > 0 && (vi % k_best) == 0 && vq == -vi && code_ok(vi / k_best));
                 end
-                prev_m = m; prev_n = n; have_prev = 1'b1;
-                if (DETAIL_LINES < 0 || detail_n < DETAIL_LINES) begin
+                if (okf) begin
+                    code = vi / k_best;
+                    mm = code_m(code);
+                    if (chan_m < 0) chan_m = mm;
+                    if (mm != chan_m || code_n(code) != n) okf = 1'b0;
+                end
+                if (!okf) begin
+                    bad_samples++;
+                    if (bad_samples <= 16)
+                        logf($sformatf("  HATALI ornek kanal=%0d ornek=%0d I=%h Q=%h (float32 ham)", c, n, wi, wq));
+                end else if (DETAIL_LINES < 0 || detail_n < DETAIL_LINES) begin
                     detail_n++;
-                    logf($sformatf("  adres=%h huzme=%0d ornek=%0d I=%0d Q=%0d", keys_m[i] << 2, m, n, vi, vq));
+                    logf($sformatf("  kanal=%0d huzme=%0d ornek=%0d I=%0d Q=%0d", c, chan_m, n, vi, vq));
                 end
-            end else begin
-                bad_samples++;
-                if (bad_samples <= 16)
-                    logf($sformatf("  HATALI ornek adres=%h I=%h Q=%h (float32 ham)", keys_m[i] << 2, mem[keys_m[i]], mem[keys_m[i+1]]));
+            end
+            if (chan_m >= 0) begin
+                if (seen_beam_m.exists(chan_m)) dup_beams++;
+                else begin seen_beam_m[chan_m] = 1'b1; beam_list_m.push_back(chan_m); end
             end
         end
         if (bad_samples != 0) begin
-            logf($sformatf("%0t HATA %0d ornek gecerli desene uymuyor", $time, bad_samples));
+            logf($sformatf("%0t HATA %0d ornek gecerli desene uymuyor ya da kanalin huzme/ornek sirasi bozuk", $time, bad_samples));
             errors++;
         end
-        if (dup_samples != 0) begin
-            logf($sformatf("%0t HATA %0d ornek birden cok kez yazilmis", $time, dup_samples));
+        if (dup_beams != 0) begin
+            logf($sformatf("%0t HATA %0d huzme birden cok kanalda yazilmis", $time, dup_beams));
             errors++;
         end
 
-        // ---- yerlesim ----
-        if (mn_inc_n > mn_inc_m)      layout = "HUZME-ANA (once bir huzmenin tum ornekleri, sonra sonraki huzme)";
-        else if (mn_inc_m > mn_inc_n) layout = "ORNEK-ANA (her ornek icin tum huzmeler, sonra sonraki ornek)";
-        else                          layout = "belirsiz";
-        logf($sformatf("%0t YERLESIM: %s (n-artan=%0d, m-artan=%0d)", $time, layout, mn_inc_n, mn_inc_m));
-
-        // ---- huzme listesi ve kapsam ----
+        // ---- huzme listesi ----
         nbeams = beam_list_m.size();
-        logf($sformatf("%0t HUZME SAYISI: %0d (beklenen RSI%0d icin %0s)", $time, nbeams, RSI_ID,
-                       has_t ? $sformatf("%0d", nk_exp) : "bilinmiyor"));
-        if (has_t && nbeams != nk_exp) begin
-            logf($sformatf("%0t HATA huzme sayisi beklenenle farkli", $time));
-            errors++;
-        end
-        sl = "  huzme listesi:";
+        logf($sformatf("%0t HUZME SAYISI: %0d", $time, nbeams));
+        sl = "  huzme listesi (kanal sirasiyla):";
         for (j = 0; j < nbeams; j++) begin
-            m  = beam_list_m[j];
-            bn = beam_n_m[m];
-            if (has_t) begin
-                if (bn != int'(t_nsample[tur])) begin
-                    logf($sformatf("%0t HATA huzme %0d: %0d ornek var, beklenen N=%0d", $time, m, bn, t_nsample[tur]));
-                    errors++;
-                end
-                if (m >= int'(t_m[tur])) begin
-                    logf($sformatf("%0t HATA huzme %0d >= M(%0d)", $time, m, t_m[tur]));
-                    errors++;
-                end
+            mm = beam_list_m[j];
+            if (has_t && mm >= int'(t_m[tur])) begin
+                logf($sformatf("%0t HATA huzme %0d >= M(%0d)", $time, mm, t_m[tur]));
+                errors++;
             end
-            rsi_beam_add(tur, m);
-            if (j < 128) sl = {sl, $sformatf(" %0d", m)};
+            rsi_beam_add(tur, mm);
+            if (j < 128) sl = {sl, $sformatf(" %0d", mm)};
             else if (j == 128) sl = {sl, " ..."};
         end
         if (nbeams != 0) logf(sl);
 
+        // ---- SCIT bolumleri ve FOOTER ----
+        tail_w = (kn_K > 0) ? (HDR_WORDS + 2 * kn_K * kn_N) : (nwords - TAIL_WORDS);
+        if (tail_w < HDR_WORDS || nwords != tail_w + TAIL_WORDS) begin
+            logf($sformatf("%0t HATA mesaj sonu: %0d kelime geldi, kuyruk dahil %0d kelime beklenir", $time, nwords, tail_w + TAIL_WORDS));
+            errors++;
+        end
+        if (nwords >= tail_w + TAIL_WORDS && tail_w >= HDR_WORDS) begin
+            nz = 0;
+            for (j = 0; j < GAC_WORDS; j++) if (wd(tail_w + j) != 0) nz++;
+            logf($sformatf("%0t GAC SCIT: %0d kelime (1920 B), sifir olmayan kelime=%0d", $time, GAC_WORDS, nz));
+            sl = "  SHOB SCIT (SHOB-1 | SHOB-2):";
+            for (j = 0; j < SHOB_WORDS; j++) sl = {sl, $sformatf(" %h", wd(tail_w + GAC_WORDS + j))};
+            logf(sl);
+            sl = "  SIBFPGA SCIT:";
+            for (j = 0; j < SIB_WORDS; j++) sl = {sl, $sformatf(" %h", wd(tail_w + GAC_WORDS + SHOB_WORDS + j))};
+            logf(sl);
+            dem = tail_w + GAC_WORDS + SHOB_WORDS + SIB_WORDS;
+            foot_ok = (wd(dem) == 32'hAAAAAAAA) && (wd(dem + 1) == 32'hBBBBBBBB) && (wd(dem + 2) == 32'hCCCCCCCC) && (wd(dem + 3) == 32'hDDDDDDDD);
+            logf($sformatf("%0t FOOTER: %h %h %h %h -> %0s", $time, wd(dem), wd(dem + 1), wd(dem + 2), wd(dem + 3), foot_ok ? "OK" : "HATA (AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD beklenir)"));
+            if (!foot_ok) errors++;
+        end
+
         dogru = (errors == 0);
         logf($sformatf("%0t TUR %0d SONUC: %s (hata=%0d, uyari=%0d)", $time, tur + 1, dogru ? "DOGRU" : "YANLIS", errors, warns));
-        $display("[%0t] [RSI%0d] tur %0d: %s, huzme=%0d, kural=%s, hata=%0d", $time, RSI_ID, tur + 1,
+        $display("[%0t] [RSI%0d] tur %0d: %s, kanal=%0d, kural=%s, hata=%0d", $time, RSI_ID, tur + 1,
                  dogru ? "DOGRU" : "YANLIS", nbeams, rule, errors);
         rsi_report_round(RSI_ID, tur, basarili, dogru, k_best, nbeams);
         reset_round();

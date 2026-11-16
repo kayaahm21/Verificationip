@@ -73,3 +73,10 @@ GAÇ kullanım durumları (HUZPAR'daki dört maske), 40 HI kullanım (HUZPAR kar
 5 µs sonra basılır (tasarımcının anlattığı akış). Yeni parametreler: `DATA_TRIGGER` (0 otomatik, 1 hep HB, 2 hep HUZPAR + gecikme), `HB_ACTIVE_HIGH`.
 `huzme_basi` bağlı değilse (Z) eski davranış (HUZPAR + gecikme) sürer. **Port eklendiği için BD/sarmalayıcıda yeniden bağlantı gerekir.** Ayrıntı:
 `docs/SHOB_HUZME_VERISI.md`.
+
+## RSİ modeli SİBFPGA → RSİ ICD formatına göre yeniden yazıldı
+
+Önceki model RSİ belleğini başlıksız `I, Q` çiftleri sanıyordu. ICD'deki "SHOB HÜZME VERİSİ & SCİT" (`0x00000002`) formatı: ID, LEN, 88 B header, kanal başına
+N adet I + N adet Q (`float32`), GAÇ SCİT (1920 B), SHOB SCİT (32 B), SİBFPGA SCİT (16 B), FOOTER (16 B, `AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD`). Model artık
+ID/LEN'i, header'ı (1DEA0003 ile karşılaştırarak), kanal sayısını, deseni ve FOOTER'ı denetliyor; kural bulunamasa da ilk 32 kelimeyi ham döküm olarak yazıyor.
+Gerçek sistemde RSİ1'e inen 2272 bayt, `K=3` kanal ve `N=8` ile tam örtüşüyordu. Bkz. `docs/RSI_MODELI.md`. `0x00000003` mesajı (Bypass ile ilgili) henüz modellenmedi.

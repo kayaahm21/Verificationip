@@ -18,29 +18,48 @@ RSİ1, RSİ2, RSİ3 için **ayrı birer örnek** gerekir (`RSI_ID = 1, 2, 3`).
    | 2 | MSI3 | SHOB→SİFPGA kanal verisi **eksik** | yalnızca log (bu sürümde hata enjeksiyonu yok) |
    | 3 | MSI4 | SHOB→SİFPGA kanal verisi **gelmedi** | yalnızca log |
 
-3. **Veri formatı:** `float32` I, sonra `float32` Q (8 bayt/örnek). Bu, RSİ modelinin işlemci taklidi olması ve
-   verinin float yazılması gerektiğinden (toplantı kararı) seçildi. **int32→float dönüşümünün tam biçimi bilinmiyor**; model,
-   değerlerin tamsayı değerli olmasını bekler (düz çevrim). Ölçekleme varsa "HATALI örnek" satırlarında ham değerler görünür.
+3. **Mesaj formatı (ICD "SHOB HÜZME VERİSİ & SCİT", SİBFPGA → RSİ, ID `0x00000002`, little-endian):**
+
+   | Bölüm | Bayt | İçerik |
+   |---|---|---|
+   | ID | 4 | `00000002` |
+   | LEN | 4 | yalnızca veri (ID/LEN hariç) = `2072 + 8·K·N` |
+   | HEADER | 88 | 0 hüzme ID (4), 4 durum (2), 6 alma hüzme sayısı (2), 8 darbe (4), 12 örnek (4), 16 reserved (8), 24..52 sekiz GAÇ kullanım maskesi, 56 SHOB-1 kart (1), 57 SHOB-2 kart (1), 58 reserved (30) |
+   | Hüzme verisi | K·N·8 | **kanal başına: önce N adet I, sonra N adet Q** (`float32`); K kanal art arda |
+   | GAÇ SCİT | 1920 | 240 GAÇ × 8 B |
+   | SHOB SCİT | 32 | SHOB-1 (16) + SHOB-2 (16) |
+   | SİBFPGA SCİT | 16 | |
+   | FOOTER | 16 | `AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD` (RSİ buffer'da hüzme verisinin bittiğini anlamak için) |
+
+   Sabit kısım 2080 bayt; **K, gelen bayt sayısından hesaplanır**: `K = (bayt − 2080) / (8·N)`, `N = darbe × örnek` (header'dan).
+   Örnek: RSİ1'e 2272 bayt indiyse `(2272 − 2080) / 64 = 3` kanal (N=8).
+
+   *Eski sürümlerde model, kelimeleri başlıksız `I, Q, I, Q ...` çiftleri sanıyordu; bu yanlıştı (her çift `I[n], I[n+1]` olarak okunup hiçbiri
+   `Q = −I` kontrolünü geçemiyordu).*
 
 ## Kontroller (her tur, her RSİ)
 
 | Kontrol | Nasıl |
 |---|---|
-| **Adres** | En düşük yazılan adres = `RSİ başlangıç adresi (1DEA0001, index 96–119)` + `offset (1DEA0003, 0/8/16)` |
-| **Bitişiklik** | Kelimeler arasında boşluk yok, kelime sayısı çift (I/Q çiftleri tam) |
-| **Desen / birleştirme kuralı** | Her I/Q çifti `±çarpan·kod` desenine uymalı. **Çarpan otomatik bulunur:** 3 = SHOB-1+SHOB-2 **toplamı** (beklenen), 1 = yalnız SHOB-1, 2 = yalnız SHOB-2. Kural dosyaya yazılır; 3 dışı çıkarsa uyarı |
-| **Yerleşim** | Huzme-ana (`m→n`) mı, örnek-ana (`n→m`) mı otomatik saptanır ve raporlanır |
-| **Eksiksizlik** | Her hüzmede tam **N = darbe×örnek** örnek, her `(m, n)` bir kez; m < M |
-| **Hüzme sayısı** | RSİ'ye düşen hüzme sayısı = `1DEA0003`'teki o RSİ'nin "indirilecek kanal sayısı" (bayt 36/37/38) |
-| **Birleşim (tüm RSİ'ler)** | Tur'un tüm RSİ'leri raporlayınca: 0..M-1 her hüzme **tam bir RSİ'de, tam bir kez** olmalı |
+| **Adres** | En düşük yazılan adres = `RSİ başlangıç adresi (1DEA0001, index 96–119)` + `offset (1DEA0003)` |
+| **Bitişiklik** | Kelimeler arasında boşluk yok |
+| **ID ve LEN** | ID `0x00000002`; `8 + LEN` = gelen bayt sayısı |
+| **Header** | huzme ID, darbe, örnek `1DEA0003` ile aynı; durum 0/1; alma hüzme sayısı M ya da bu RSİ'nin kanal sayısı; reserved ve GAÇ maskelerinin 30/31. bitleri sıfır (uyarı) |
+| **Kanal sayısı** | `K` = `1DEA0003`'teki bu RSİ'ye indirilecek hüzme sayısı (bayt 36/37/38) |
+| **Desen / birleştirme kuralı** | Her kanalın her örneği `±çarpan·kod` desenine uymalı, kanal içinde hüzme aynı ve örnek sırası 0..N−1. **Çarpan otomatik bulunur:** 3 = SHOB-1+SHOB-2 **toplamı** (beklenen), 1 = yalnız SHOB-1, 2 = yalnız SHOB-2 |
+| **FOOTER** | Son 16 bayt `AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD` ve mesajın sonunda |
+| **SCİT'ler** | Yalnızca raporlanır (GAÇ SCİT'te sıfır olmayan kelime sayısı, SHOB/SİBFPGA SCİT değerleri) |
+| **Birleşim (tüm RSİ'ler)** | Tur'un tüm RSİ'leri raporlayınca: 0..M−1 her hüzme **tam bir RSİ'de, tam bir kez** olmalı |
 
-Hüzmelerin hangi RSİ'ye gittiği **kontrol edilmez**, yalnızca raporlanır (kural toplantıda doğrulanmadı; "bloklar halinde,
-fazlalık RSİ1'e" varsayıldı, yalnızca sayı kontrolü yapılır).
+**Ham döküm:** Birleştirme kuralı ya da format bulunamasa bile dosyanın başında mesajın **ilk 32 kelimesi** adres, hex ve (tamsayı değerliyse) float
+yorumuyla her zaman yazılır. Format uyuşmadığında ilk bakılacak yer burası.
+
+Hüzmelerin hangi RSİ'ye gittiği **kontrol edilmez**, yalnızca raporlanır.
 
 ## Çıktı dosyaları
 
-- `rsi_out_rsi<N>.txt` (`OUT_PREFIX` ya da `+RSI_OUT=`): tur başına ISR satırı, adres/kural/yerleşim/kapsam sonuçları, ilk
-  `DETAIL_LINES` örnek (`adres huzme ornek I Q`), hatalar ve `TUR n SONUC: DOGRU/YANLIS`.
+- `rsi_out_rsi<N>.txt` (`OUT_PREFIX` ya da `+RSI_OUT=`): tur başına ISR satırı, ham döküm, `MESAJ` (ID/LEN), `HEADER`, kanal sayısı, birleştirme kuralı,
+  ilk `DETAIL_LINES` örnek (`kanal huzme ornek I Q`), hatalar, SCİT/FOOTER ve `TUR n SONUC: DOGRU/YANLIS`.
 - `rsi_tur_ozeti.txt` (CPU paketi yazar): her tur için bir satır (RSİ başına `YAZILDI/YAZILAMADI`, huzme sayısı, `DOGRU/YANLIS`)
   ve tüm RSİ'ler bitince **birleşim** satırı (eksik/çift hüzme, kurallar).
 - Konsol: `[RSIn] tur k: DOGRU/YANLIS, huzme=…, kural=…, hata=…`
