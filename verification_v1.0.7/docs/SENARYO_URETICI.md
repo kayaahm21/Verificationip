@@ -49,3 +49,13 @@ Katsayılar ve IÜB verisi rastgele (sabit tohum `--seed`); SHOB hüzme verisi b
 
 Gerçekte hüzparlar bir **önceki** turun HB'si ile yeni HB arasında gelir ve veri HB'den *sonra* basılır; bu VIP'te SHOB'a HB verilmediği
 için veri **HUZPAR + 5 µs**'de başlar. Senaryoda HB komutları (`77777777`/`99999999`) yalnızca tur zamanlaması içindir.
+
+## Maksimum büyüklükte tek hüzme (`examples/input_huzme_MAX_tek_huzme.txt`)
+
+`python3 tools/gen_huzme_rounds.py --round 96,128,256,32,32,32 --period-ns 500000 --iub-m 96 --iub-n 4`, sonuna `88888888 30000000` eklenmiştir.
+
+- M=96 (üst sınır), darbe=128, örnek=256 → N=32768 (örnek kodu 15 bit olduğu için desen kontrolü bu N'ye kadar geçerli).
+- RSİ başına 32 hüzme (32+32+32=96). Her RSİ mesajı ≈ 8,4 MB (modelin 16 MiB sınırının altında).
+- SHOB hüzme verisi ≈ 25,2 MB (VIP'in `DATA_MAX_BYTES` = 32 MiB sınırının altında). SHOB HUZPAR'ı 184376 bayt, IUB HUZPAR'ı 68008 bayt.
+- HB periyodu 500 µs: HUZPAR'ların gönderimi HB'den önce bitmeli; yoksa SHOB bir sonraki HB'yi bekler. Sonundaki 30 ms bekleme, veri ve RSİ yazımlarının bitmesi içindir.
+- Simülasyon süresi ve bellek kullanımı yüksektir; dalga formu kaydını kapatmanız önerilir.
