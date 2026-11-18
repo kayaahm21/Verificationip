@@ -148,10 +148,16 @@ package scn_pkg;
     // generator : senaryo dosyasini okur, scn_cmd uretip mailbox'a koyar
     // =================================================================
     class generator;
-        localparam int BIG_LINE_CHARS = 4096;   // v1.0.8: bundan uzun satirlar akisli ayristirilir
-        int sp = 0;                             // v1.0.8: satir uzerindeki tarama konumu
-        string bl = "";                         // v1.0.8: uzun satirin kopyasi (fonksiyonlara parametre gecilmez)
-        bit [63:0] big_t0;                      // v1.0.8: uzun TLP satirinin ADRES alani
+        // v1.0.8: dosya karakter karakter ($fgetc) okunur; buyuk bir string (satir) hic olusturulmaz.
+        bit stream_read = 1'b1;     // 0: eski $fgets + tokenize yolu
+        int sfd     = 0;            // akisli okuma dosya tanitici
+        int pb_n    = 0;            // geri itilen karakter sayisi (en fazla 2)
+        int pb0     = 0;            // geri itilenlerin ustu
+        int pb1     = 0;
+        int ln_cnt  = 0;            // dosyadan tuketilen '\n' sayisi
+        int last_c  = 10;           // dosyadan okunan son karakter
+        bit at_eol  = 1'b0;         // son okuma satir sonunda (\n, EOF veya yorum) bitti
+        bit got_eof = 1'b0;
         int max_dw = 32;   // v1.0.7: paket basina en fazla DWORD; daha buyuk mesajlar bolunur (0: bolme yok)
         mailbox #(scn_cmd) mbx;
         string             file_name;
@@ -169,32 +175,26 @@ package scn_pkg;
             string line;
             string toks[$];
             scn_cmd end_cmd;
-            int    kind_big;
 
-            $display("[GEN] scn_pkg: otomatik bolme surumu (v1.0.7, max_dw=%0d DWORD/paket)", max_dw);   // hangi dosyanin derlendigini gosterir
-            fd = $fopen(file_name, "r");
-            if (fd == 0) $fatal(1, "[GEN-FATAL] Senaryo dosyasi bulunamadi: %s", file_name);
-
-            while (!$feof(fd)) begin
-                line = "";
-                code = $fgets(line, fd);
-                if (code == 0) break;
-                line_no++;
-                // v1.0.8: cok uzun satirlar (buyuk huzpar) token kuyrugu olusturmadan akisli ayristirilir
-                if (line.len() > BIG_LINE_CHARS) begin
-                    bl = line;   // tek kopya; yardimcilar bl uzerinde calisir (satir parametre olarak kopyalanmaz)
-                    kind_big = classify_big();
-                    if (kind_big == 1) continue;
-                    if (kind_big == 2) begin
-                        big_tlp(line_no, big_t0);
-                        continue;
-                    end
+            $display("[GEN] scn_pkg: otomatik bolme surumu (v1.0.8, max_dw=%0d DWORD/paket, %s okuma)",
+                     max_dw, stream_read ? "akisli" : "satir");   // hangi dosyanin derlendigini gosterir
+            if (stream_read) begin
+                run_stream();             // dosyayi kendisi acar/kapatir
+                line_no = ln_cnt + ((last_c != 10) ? 1 : 0);
+            end else begin
+                fd = $fopen(file_name, "r");
+                if (fd == 0) $fatal(1, "[GEN-FATAL] Senaryo dosyasi bulunamadi: %s", file_name);
+                while (!$feof(fd)) begin
+                    line = "";
+                    code = $fgets(line, fd);
+                    if (code == 0) break;
+                    line_no++;
+                    tokenize(line, toks);
+                    if (toks.size() == 0) continue;   // bos satir / sadece yorum
+                    parse_line(toks, line_no);
                 end
-                tokenize(line, toks);
-                if (toks.size() == 0) continue;   // bos satir / sadece yorum
-                parse_line(toks, line_no);
+                $fclose(fd);
             end
-            $fclose(fd);
 
             // Dosya sonu isareti: driver bunu gorunce "senaryo bitti" yazar.
             end_cmd = new(CMD_END, line_no);
@@ -203,126 +203,161 @@ package scn_pkg;
         endtask
 
         // -----------------------------------------------------------------
-        // v1.0.8: BUYUK SATIR ICIN AKISLI AYRISTIRMA
-        // Uzun bir TLP satirinda (ornegin 184 bin baytlik SHOB huzpar) her bayt icin ayri string
-        // uretip kuyruga koymak cok bellek harcar (xsim'de GB'lar). Burada satir karakter karakter
-        // taranir: ilk 3-4 alan (ADRES [BAR] MSGID LEN) string olarak, veri baytlari dogrudan sayi olarak
-        // okunur ve tek seferde ayrilan mbytes[] dizisine yazilir. Yorum ('#', "//") ve ayirici
-        // (bosluk, tab, virgul) kurallari tokenize ile ayni.
+        // v1.0.8: AKISLI OKUMA ($fgetc). xsim'de 550 bin karakterlik tek bir string uzerinde getc/substr ve
+        // $fgets cok yavas ve bellek yiyici oldugundan dosya karakter karakter okunur: yalniz kisa token'lar
+        // (ADRES, BAR, MSGID, LEN, komutlar) string olur; veri baytlari dogrudan sayi olarak okunup LEN'e
+        // gore bir kez ayrilan mbytes[]'e yazilir. Yorum ('#', "//"), ayirici (bosluk, tab, virgul), BAR,
+        // otomatik bolme ve hata kurallari eski yolla ayni.
         // -----------------------------------------------------------------
-
-        function automatic bit is_sep(byte c);
-            return (c == " " || c == "\t" || c == "\n" || c == "\r" || c == ",");
+        function automatic int rc();                 // bir karakter oku (geri itilenden once)
+            int c;
+            if (pb_n > 0) begin
+                c   = pb0;
+                pb0 = pb1;
+                pb_n--;
+                return c;
+            end
+            c = $fgetc(sfd);
+            if (c == 10) ln_cnt++;
+            if (c != -1) last_c = c;
+            return c;
         endfunction
 
-        // Ayiricilari atlar; yorum baslangicinda (veya satir sonunda) sp'yi sona alip 0 doner.
-        function automatic bit skip_seps();
-            int n = bl.len();
-            while (sp < n && is_sep(bl.getc(sp))) sp++;
-            if (sp >= n) return 1'b0;
-            if (bl.getc(sp) == "#") begin sp = n; return 1'b0; end
-            if (bl.getc(sp) == "/" && (sp + 1) < n && bl.getc(sp + 1) == "/") begin sp = n; return 1'b0; end
-            return 1'b1;
+        function automatic void unrc(int c);         // karakteri geri it
+            pb1 = pb0;
+            pb0 = c;
+            pb_n++;
         endfunction
 
-        // Siradaki token'i dondurur ("" = satir/yorum sonu).
-        function automatic string next_tok();
-            string cur = "";
-            int    n = bl.len();
-            if (!skip_seps()) return "";
-            while (sp < n && !is_sep(bl.getc(sp))) begin
-                if (bl.getc(sp) == "#") break;
-                if (bl.getc(sp) == "/" && (sp + 1) < n && bl.getc(sp + 1) == "/") break;
-                cur = {cur, bl.substr(sp, sp)};
-                sp++;
+        function automatic void skip_to_nl();        // satirin kalanini ('\n' dahil) atla
+            int c;
+            c = 0;
+            while (c != 10 && c != -1) c = rc();
+            if (c == -1) got_eof = 1'b1;
+            at_eol = 1'b1;
+        endfunction
+
+        // Bir token baslangicina kadar ayiricilari atlar. Token'in ilk karakterini dondurur;
+        // satir sonu / yorum / EOF ise -2 (at_eol=1).
+        function automatic int tok_start();
+            int c, c2;
+            if (at_eol) return -2;                     // satir zaten bitti: sonraki satira gecme
+            while (1) begin
+                c = rc();
+                if (c == -1) begin got_eof = 1'b1; at_eol = 1'b1; return -2; end
+                if (c == 10) begin at_eol = 1'b1; return -2; end
+                if (c == 32 || c == 9 || c == 13 || c == 44) continue;
+                if (c == 35) begin skip_to_nl(); return -2; end                       // '#'
+                if (c == 47) begin                                                    // "//"
+                    c2 = rc();
+                    if (c2 == 47) begin skip_to_nl(); return -2; end
+                    unrc(c2);
+                end
+                return c;
+            end
+        endfunction
+
+        // Token biter mi? Bitiriciyse 1 (at_eol uygun ayarlanir; '#' ve "//" geri itilir).
+        function automatic bit is_term(int c);
+            int c2;
+            if (c == -1) begin got_eof = 1'b1; at_eol = 1'b1; return 1'b1; end
+            if (c == 10) begin at_eol = 1'b1; return 1'b1; end
+            if (c == 32 || c == 9 || c == 13 || c == 44) return 1'b1;
+            if (c == 35) begin unrc(c); return 1'b1; end
+            if (c == 47) begin
+                c2 = rc();
+                if (c2 == 47) begin unrc(c2); unrc(c); return 1'b1; end
+                unrc(c2);
+            end
+            return 1'b0;
+        endfunction
+
+        // Siradaki kisa token ("" = satir/yorum sonu; at_eol=1).
+        function automatic string read_tok();
+            string cur;
+            int c;
+            cur = "";
+            c = tok_start();
+            if (c < 0) return "";
+            while (1) begin
+                cur = $sformatf("%s%c", cur, c[7:0]);
+                c = rc();
+                if (is_term(c)) break;
             end
             return cur;
         endfunction
 
-        // Siradaki hex bayti sayi olarak dondurur: 0..255; -1 satir sonu; -2 gecersiz/buyuk.
-        function automatic int next_byte();
-            int n = bl.len();
-            int v = 0;
-            int nd = 0;
-            int digit;
-            byte c;
-            if (!skip_seps()) return -1;
-            if ((sp + 1) < n && bl.getc(sp) == "0" && (bl.getc(sp + 1) == "x" || bl.getc(sp + 1) == "X")) sp += 2;
-            while (sp < n && !is_sep(bl.getc(sp))) begin
-                c = bl.getc(sp);
-                if (c == "#" || (c == "/" && (sp + 1) < n && bl.getc(sp + 1) == "/")) break;
-                sp++;
-                if (c == "_") continue;
-                if      (c >= "0" && c <= "9") digit = c - "0";
-                else if (c >= "a" && c <= "f") digit = c - "a" + 10;
-                else if (c >= "A" && c <= "F") digit = c - "A" + 10;
-                else begin
-                    while (sp < n && !is_sep(bl.getc(sp))) sp++;   // bozuk token'in kalanini atla
-                    return -2;
-                end
-                v = (v << 4) | digit;
-                nd++;
-                if (nd > 2) begin
-                    while (sp < n && !is_sep(bl.getc(sp))) sp++;
-                    return -2;                                     // > 0xFF
-                end
+        // Siradaki hex bayt: 0..255; -1 satir bitti (bayt yok); -2 gecersiz/>0xFF (token'in kalani atlanir).
+        function automatic int read_byte();
+            int c, c2, v, nd, digit;
+            bit bad;
+            v = 0; nd = 0; bad = 1'b0;
+            c = tok_start();
+            if (c < 0) return -1;
+            if (c == 48) begin                                   // "0x" oneki
+                c2 = rc();
+                if (c2 == 120 || c2 == 88) begin
+                    c = rc();
+                    if (is_term(c)) return -2;
+                end else unrc(c2);
             end
-            return (nd > 0) ? v : -2;
+            while (1) begin
+                if (c == 95) begin end                           // '_'
+                else if (c >= 48 && c <= 57)  begin digit = c - 48;      v = (v << 4) | digit; nd++; end
+                else if (c >= 97 && c <= 102) begin digit = c - 97 + 10; v = (v << 4) | digit; nd++; end
+                else if (c >= 65 && c <= 70)  begin digit = c - 65 + 10; v = (v << 4) | digit; nd++; end
+                else bad = 1'b1;
+                if (nd > 2) bad = 1'b1;
+                c = rc();
+                if (is_term(c)) break;
+            end
+            if (bad || nd == 0) return -2;
+            return v;
         endfunction
 
-        // Uzun satirin turunu belirler: 0 = bu yol uygun degil (komut vb.; eski yol), 1 = yorum/bos (atla),
-        // 2 = TLP (big_tlp ile akisli ayristirilir). TLP ise ADRES big_t0'da, sp ADRES'ten sonrasinda kalir.
-        function automatic int classify_big();
-            string s0;
-            bit [63:0] t0;
-            sp = 0;
-            s0 = next_tok();
-            if (s0 == "") return 1;
-            if (!parse_hex(s0, t0)) return 0;
-            if (t0 == ADDR_WAIT_BEAM || t0 == ADDR_WAIT_NS || t0 == ADDR_PLAN_BEAM) return 0;
-            big_t0 = t0;
-            return 2;
-        endfunction
-
-        // ADRES [BAR<n>] MSGID LEN DATA...  (parse_tlp ile ayni kurallar ve ayni paketleme)
-        task big_tlp(int line_no, bit [63:0] address);
+        // ADRES [BAR<n>] MSGID LEN DATA...  (ADRES zaten okundu; parse_tlp ile ayni kurallar/paketleme)
+        task stream_tlp(int line_no, bit [63:0] address);
             bit [63:0]       mid;
-            longint unsigned dlen;
-            string           t1, t2;
-            bit [2:0]        bar = 3'd0;
+            longint unsigned dlen, bn;
+            string           t1, t2, tx;
+            bit [2:0]        bar;
             bit [31:0]       msg_id;
             int              data_len, total, chunk, npk, v, k, off, n, dw;
             bit [7:0]        desc[16];
             bit [7:0]        mbytes[];
             tlp_item         tr;
             scn_cmd          cmd;
-            longint unsigned bn;
 
-            t1 = next_tok();
+            bar = 3'd0;
+            t1 = read_tok();
             if (t1.len() >= 4) begin
                 t2 = t1.substr(0, 2);
                 if (t2 == "BAR" || t2 == "bar" || t2 == "Bar") begin
                     if (!parse_dec(t1.substr(3, t1.len() - 1), bn) || bn > 6) begin
                         $error("[GEN] satir %0d: gecersiz BAR alani '%s' (BAR0..BAR6), satir atlandi.", line_no, t1);
+                        if (!at_eol) skip_to_nl();
                         return;
                     end
                     bar = bn[2:0];
-                    t1  = next_tok();
+                    t1  = (at_eol) ? "" : read_tok();
                 end
             end
-            t2 = next_tok();
-            if (!parse_hex(t1, mid) || !parse_dec(t2, dlen)) begin
+            t2 = (at_eol) ? "" : read_tok();
+            if (t1 == "" || t2 == "" || !parse_hex(t1, mid) || !parse_dec(t2, dlen)) begin
                 $error("[GEN] satir %0d: TLP satiri 'ADRES MSGID LEN DATA...' bicimde degil, atlandi.", line_no);
+                if (!at_eol) skip_to_nl();
                 return;
             end
             if ((mid >> 32) != 0 || dlen > ((max_dw > 0) ? 64'd1048576 : 64'd8192)) begin
                 $error("[GEN] satir %0d: MSGID 32 bitten buyuk ya da LEN cok buyuk, atlandi.", line_no);
+                if (!at_eol) skip_to_nl();
                 return;
             end
             msg_id   = mid[31:0];
             data_len = int'(dlen);
             if ((data_len % 4) != 0) begin
                 $error("[GEN] satir %0d: LEN (%0d) 4'un kati degil, satir atlandi.", line_no, data_len);
+                if (!at_eol) skip_to_nl();
                 return;
             end
 
@@ -331,25 +366,31 @@ package scn_pkg;
             for (int i = 0; i < 4; i++) mbytes[i]     = msg_id[8*i +: 8];
             for (int i = 0; i < 4; i++) mbytes[4 + i] = data_len[8*i +: 8];
             for (int i = 0; i < data_len; i++) begin
-                v = next_byte();
+                v = read_byte();
                 if (v == -1) begin
                     $error("[GEN] satir %0d: LEN=%0d ama %0d veri baytı var, satir atlandi.", line_no, data_len, i);
                     return;
                 end
                 if (v < 0) begin
                     $error("[GEN] satir %0d: veri baytı (%0d. bayt) gecersiz, satir atlandi.", line_no, i);
+                    if (!at_eol) skip_to_nl();
                     return;
                 end
                 mbytes[8 + i] = v[7:0];
             end
-            if (next_byte() != -1) begin
-                $error("[GEN] satir %0d: LEN=%0d ama daha fazla veri baytı var, satir atlandi.", line_no, data_len);
-                return;
+            if (!at_eol) begin
+                tx = read_tok();
+                if (tx != "") begin
+                    $error("[GEN] satir %0d: LEN=%0d ama daha fazla veri baytı var, satir atlandi.", line_no, data_len);
+                    if (!at_eol) skip_to_nl();
+                    return;
+                end
             end
 
-            // paketleme: max_dw'den buyukse bol (parse_tlp ile ayni), degilse tek TLP
             chunk = (max_dw > 0 && total > max_dw * 4) ? (max_dw * 4) : total;
             npk   = (total + chunk - 1) / chunk;
+            if (npk == 1 && ((total / 4) > 1024))
+                $warning("[GEN] satir %0d: DWORD sayisi %0d > 1024 (MPS/4KB siniri asilmis olabilir).", line_no, total / 4);
             for (k = 0; k < npk; k++) begin
                 off = k * chunk;
                 n   = ((total - off) < chunk) ? (total - off) : chunk;
@@ -377,9 +418,46 @@ package scn_pkg;
                 cmd.tlp = tr;
                 mbx.put(cmd);
             end
-            $display("[GEN] satir %0d: TLP (akisli ayristirma, %0d DWORD) -> Addr: %h | BAR%0d | MsgID: %h | Len: %0d | %0d paket (%0d bayt toplam)",
-                     line_no, max_dw, address, bar, msg_id, data_len, npk, total);
+            if (max_dw > 0 && total > max_dw * 4)
+                $display("[GEN] satir %0d: TLP (otomatik bolme, %0d DWORD) -> Addr: %h | BAR%0d | MsgID: %h | Len: %0d | %0d paket (%0d bayt toplam)",
+                         line_no, max_dw, address, bar, msg_id, data_len, npk, total);
+            else
+                $display("[GEN] satir %0d: TLP -> Addr: %h | BAR%0d | MsgID: %h | Len: %0d | TotalTLP: %0d byte",
+                         line_no, address, bar, msg_id, data_len, 16 + total);
             mbytes.delete();
+        endtask
+
+        // Akisli okuma: dosyanin tamamini $fgetc ile isler.
+        task run_stream();
+            string toks[$];
+            string s0, sx;
+            bit [63:0] t0;
+            int start_line;
+
+            sfd = $fopen(file_name, "r");
+            if (sfd == 0) $fatal(1, "[GEN-FATAL] Senaryo dosyasi bulunamadi: %s", file_name);
+            pb_n = 0; ln_cnt = 0; last_c = 10; at_eol = 1'b1; got_eof = 1'b0;
+            while (1) begin
+                start_line = ln_cnt + 1;
+                at_eol = 1'b0;                                  // yeni satir basliyor
+                s0 = read_tok();
+                if (s0 == "") begin
+                    if (got_eof) break;
+                    continue;                                   // bos satir / sadece yorum
+                end
+                if (parse_hex(s0, t0) && t0 != ADDR_WAIT_BEAM && t0 != ADDR_WAIT_NS && t0 != ADDR_PLAN_BEAM) begin
+                    stream_tlp(start_line, t0);                 // gercek TLP
+                end else begin
+                    toks.delete();                              // komut (kisa satir) ya da hatali ilk alan
+                    toks.push_back(s0);
+                    while (!at_eol) begin
+                        sx = read_tok();
+                        if (sx != "") toks.push_back(sx);
+                    end
+                    parse_line(toks, start_line);
+                end
+            end
+            $fclose(sfd);
         endtask
 
         // Tek satirin token'larina bakip komut turunu belirler.

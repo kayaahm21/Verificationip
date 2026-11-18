@@ -3,6 +3,7 @@
 //   +MODE=0 : dosyayi sadece $fgets ile satir satir okur (ayristirma yok)
 //   +MODE=1 : generator.run() (tam ayristirma, mailbox'a koyma)
 //   +MODE=2 : MODE=1 + mailbox'taki tum paketleri bosaltir
+//   +STREAM=0 : (MODE 1/2) eski $fgets+tokenize yolu; 1 (varsayilan): $fgetc ile akisli okuma
 //   +F=<dosya>
 module tb_gen_only;
     import scn_pkg::*;
@@ -15,10 +16,11 @@ module tb_gen_only;
     generator gen;
     scn_cmd c;
     string f, line;
-    int mode, fd, code, nl, maxlen, npk;
+    int mode, fd, code, nl, maxlen, npk, stream;
     initial begin
         if (!$value$plusargs("F=%s", f)) f = "input_huzme_MAX_tek_huzme.txt";
         if (!$value$plusargs("MODE=%d", mode)) mode = 1;
+        if (!$value$plusargs("STREAM=%d", stream)) stream = 1;
         $display("[TESHIS] baslangic: MODE=%0d dosya=%s", mode, f);
         if (mode == 0) begin
             fd = $fopen(f, "r");
@@ -36,6 +38,7 @@ module tb_gen_only;
             $display("[TESHIS] MODE=0 bitti: %0d satir, en uzun satir %0d karakter", nl, maxlen);
         end else begin
             gen = new(mbx, f);
+            gen.stream_read = (stream != 0);
             gen.run();
             $display("[TESHIS] generator.run() bitti, mailbox'ta %0d komut", mbx.num());
             if (mode == 2) begin
