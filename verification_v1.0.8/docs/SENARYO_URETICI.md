@@ -64,7 +64,7 @@ için veri **HUZPAR + 5 µs**'de başlar. Senaryoda HB komutları (`77777777`/`9
 
 `python3 tools/gen_huzme_random.py > examples/input_huzme_100_rastgele.txt` (sabit tohum 20261118).
 
-- 100 tur (hüzme ID 0xA001..0xA064). Her turda rastgele: M ∈ {4,8,12,16}, darbe 1..4, örnek ∈ {4,8,...,32} (N 4..128),
+- 100 tur (hüzme ID 0xA001..0xA064). Tur sırası: `77777777`, `1DEA0003`, IUB (BAR3), SHOB-1 (BAR1), SHOB-2 (BAR2), `99999999`, bekleme. Her turda rastgele: M ∈ {4,8,12,16}, darbe 1..4, örnek ∈ {4,8,...,32} (N 4..128),
   RSİ başına hüzme sayıları (n1+n2+n3 = M, her biri ≥ 1).
 - Her turun HB'sinden sonra 20 veya 30 µs (rastgele) bekleme (`88888888`). HB periyodu max(60 µs, 20 µs + 3 µs × M)
   (60–68 µs); hüzpar'lar HB'den önce varmalıdır.

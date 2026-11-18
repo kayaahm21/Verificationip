@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Rastgele parametreli cok turlu huzme senaryosu uretir (v1.0.8).
 
-Her tur gen_huzme_rounds.py ile ayni sirada uretilir (1DEA0001 bir kez; her tur: 77777777, 1DEA0003, SHOB-1/2 E001,
-IUB 00000001, 99999999); ek olarak her turun HB'sinden sonra 20 veya 30 us (rastgele) bekleme (88888888) konur.
+Tur sirasi (1DEA0001 bir kez; her tur): 77777777, 1DEA0003, IUB 00000001 (BAR3), SHOB-1 E001 (BAR1), SHOB-2 E001 (BAR2),
+99999999; ek olarak her turun HB'sinden sonra 20 veya 30 us (rastgele) bekleme (88888888) konur.
 
 Rastgele secilenler (sabit tohumla tekrarlanabilir): M (4'un kati), darbe, ornek (4'un kati), RSI basina huzme sayilari
 (n1+n2+n3 = M, her biri >= 1), bekleme (20/30 us). Huzme ID'si her turda +1 artar.
@@ -51,7 +51,7 @@ def main():
 
     out = []
     out.append("# v1.0.8: %d turluk rastgele huzme senaryosu (gen_huzme_random.py, tohum=%d)" % (a.count, a.seed))
-    out.append("# Her tur: HB planla, 1DEA0003, SHOB-1/2 E001, IUB 00000001, HB bekle, 20/30 us bekle")
+    out.append("# Her tur: HB planla, 1DEA0003, IUB 00000001, SHOB-1/2 E001, HB bekle, 20/30 us bekle")
 
     cfg = []
     for base, size, ptr in [(0x10000, 4096, 0x20000), (0x30000, 4096, 0x40000),
@@ -78,9 +78,9 @@ def main():
                    % (r + 1, m, darbe, ornek, darbe * ornek, nk[0], nk[1], nk[2], hid, period_ns // 1000, gap_us))
         out.append("77777777 %d" % period_ns)
         out.append(line(0, "1DEA0003", sifpga_huzpar([0, 0, 0], hid, m, darbe, ornek, nk)))
+        out.append(line(3, "00000001", iub_huzpar(hid, rnd, m, a.iub_n)))          # IUB (BAR3) SHOB'lardan once
         out.append(line(1, "0000E001", shob_huzpar(hid, m, darbe, ornek, rnd)))
         out.append(line(2, "0000E001", shob_huzpar(hid, m, darbe, ornek, rnd)))
-        out.append(line(3, "00000001", iub_huzpar(hid, rnd, m, a.iub_n)))
         out.append("99999999")
         out.append("88888888 %d" % (gap_us * 1000))
 
