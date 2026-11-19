@@ -1,0 +1,263 @@
+% sim_model_cpu.sv ve cpu_pkg.sv - RSY (Radar Sistem Yönetimi) modeli kod açıklaması (taslak)
+% Overleaf: pdfLaTeX. Satır numaraları v1.0.9 kaynak dosyalarına göredir.
+% "TODO" işaretli yerler doldurulacak.
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[turkish]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{textcomp}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\renewcommand{\arraystretch}{1.2}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{RSY modeli}
+\rhead{Kod açıklaması (taslak)}
+\cfoot{\thepage}
+
+\newcommand{\us}{\,\textmu{}s}
+\newcommand{\kod}[1]{\texttt{#1}}
+\newcommand{\todo}[1]{\textcolor{red!60!black}{\textbf{[TODO]} #1}}
+\newcommand{\satir}[1]{\textcolor{black!60}{\scriptsize(satır #1)}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  upquote=true,
+  extendedchars=false
+}
+
+\tikzset{
+  kutu/.style={draw=black!60, rounded corners=3pt, align=center,
+               minimum height=1cm, inner sep=4pt, font=\small},
+  ana/.style={kutu, draw=blue!70!black, fill=blue!8, very thick},
+  ok/.style={-{Stealth[length=2.2mm]}, thick, black!70},
+  etiket/.style={font=\scriptsize, text=black!70}
+}
+
+\title{\textbf{RSY (Radar Sistem Yönetimi) Modeli}\\[0.3em]
+       \large \kod{sim\_model\_cpu.sv} ve \kod{cpu\_pkg.sv} kod açıklaması (taslak)}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%---------------------------------------------------------------
+\section{Genel bakış}
+
+\todo{Modelin iki yönü: (1) CPU $\to$ FPGA: senaryo dosyasını okur, TLP'leri CQ
+portundan tasarıma sürer, bekleme ve HB komutlarını çalıştırır. (2) FPGA $\to$ CPU:
+RQ portundan gelen bellek yazımlarını yakalar, işlemci belleğine yazar, MSI gelince
+dairesel tamponlardan mesajları okuyup dosyalara yazar. Ayrıca PCIe IP'sinin yerine
+geçer: saat, reset, link-up ve MSI cevabı üretir.}
+
+\begin{itemize}[nosep]
+  \item Dosyalar: \kod{src/sim\_model\_cpu.sv} (232 satır), \kod{src/cpu\_pkg.sv}
+        (604 satır), senaryo motoru için \kod{src/scn\_pkg.sv} (859 satır).
+  \item \kod{sim\_model\_rsi} ile farkı: RSY modeli CQ'yu sürer ve 4 dairesel tampondan
+        mesaj okur; RSİ modeli yalnızca RQ'yu dinler.
+  \item Çıktılar: \kod{<OUT\_PREFIX>\_sifpga.txt}, \kod{\_shob1.txt}, \kod{\_shob2.txt},
+        \kod{\_iub.txt} ve \kod{rq\_trace.txt}.
+\end{itemize}
+
+\subsection{Blok şeması}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=0.8cm and 1.0cm]
+  \node[kutu, text width=2.6cm] (gen) {\kod{generator}\\ dosyayı okur};
+  \node[kutu, text width=2.4cm, right=of gen] (mbx) {\kod{mailbox}\\ \kod{scn\_cmd}};
+  \node[kutu, text width=2.4cm, right=of mbx] (drv) {\kod{driver}\\ CQ'yu sürer};
+  \node[ana, text width=2.6cm, right=of drv] (sif) {SİFPGA};
+  \node[kutu, text width=2.4cm, below=1.4cm of drv] (beam) {\kod{beam\_ctrl}\\ HB};
+  \node[kutu, text width=2.6cm, below=1.4cm of sif] (asm) {\kod{rq\_assembler}\\ RQ $\to$ TLP};
+  \node[ana, text width=2.6cm, below=1.0cm of asm] (cpu) {\kod{cpu\_model}\\ bellek, tamponlar, ISR};
+  \node[kutu, text width=2.4cm, left=of cpu] (out) {çıktı dosyaları\\ \kod{cpu\_out\_*.txt}};
+  \draw[ok] (gen) -- (mbx);
+  \draw[ok] (mbx) -- (drv);
+  \draw[ok] (drv) -- node[etiket,above]{CQ} (sif);
+  \draw[ok] (beam) -- node[etiket,above]{HB} (sif);
+  \draw[ok] (drv) -- (beam);
+  \draw[ok] (sif) -- node[etiket,right]{RQ, MSI} (asm);
+  \draw[ok] (asm) -- (cpu);
+  \draw[ok] (cpu) -- (out);
+\end{tikzpicture}
+\caption{RSY modelinin iç yapısı. \todo{Şemayı kodla karşılaştır.}}
+\end{figure}
+
+%---------------------------------------------------------------
+\section{Parametreler ve portlar}
+\satir{22--73}
+
+\begin{longtable}{@{}p{3.8cm}p{2.6cm}p{8.5cm}@{}}
+\toprule
+Parametre & Varsayılan & Anlamı \\
+\midrule
+\endhead
+\kod{INPUT\_FILE} & \kod{input\_data.txt} & Senaryo dosyası (\kod{+TLP\_FILE=} ile değişir) \\
+\kod{BEAM\_SOURCE} & \kod{SCRIPT} & HB'yi senaryo mu (\kod{SCRIPT}) yoksa gerçek modül mü (\kod{DESIGN}) üretir \\
+\kod{BEAM\_PULSE\_CLKS} & 1 & Üretilen HB darbesinin genişliği (clock) \\
+\kod{BEAM\_ACTIVE\_HIGH} & 1 & HB aktif-yüksek mi \\
+\kod{OUT\_PREFIX} & \kod{cpu\_out} & Mesaj dosyalarının ön eki (\kod{+CPU\_OUT=}) \\
+\kod{ISR\_ALL\_BUFFERS} & 0 & 1: vektör ne olursa olsun 4 tamponu da oku \\
+\kod{TRACE\_FILE} & \kod{rq\_trace.txt} & Gelen tüm TLP'lerin izi (\kod{+RQ\_TRACE=}) \\
+\kod{MAX\_TLP\_DWORDS} & 32 & CPU$\to$FPGA paket başına en çok DWORD; büyük mesajlar bölünür \\
+\kod{ISR\_LATENCY\_NS} & 100 & MSI'dan sonra ISR'nin başlaması için bekleme \\
+\kod{CFG\_MSG\_ID} & \kod{1DEA0001} & Tamponları programlayan mesajın ID'si \\
+\kod{CFG\_BIG\_ENDIAN}, \kod{PTR\_BIG\_ENDIAN}, \kod{MSG\_BIG\_ENDIAN} & 0 & Bayt sırası ayarları (0 = küçük-endian) \\
+\bottomrule
+\end{longtable}
+
+\todo{Portlar: CQ (VIP $\to$ tasarım), RQ (tasarım $\to$ VIP), MSI, HB
+(\kod{huzme\_basi\_obs} izlenir, \kod{huzme\_basi\_gen} üretilir).}
+
+%---------------------------------------------------------------
+\section{Saat, reset ve link}
+\satir{79--93}
+
+\todo{\kod{user\_clk} 125~MHz (8~ns periyot). Reset 20 clk aktif, ardından 20 clk
+sonra \kod{user\_lnk\_up}. Sürücü reset ve link sonrası başlar.}
+
+%---------------------------------------------------------------
+\section{RQ yakalama}
+\satir{95--112}
+
+\todo{\kod{s\_axis\_rq\_tready = 4'hF}. Her kabul edilen beat \kod{asm.push\_beat}'e
+verilir; TLP tamamlanınca \kod{cpu.on\_pkt}.}
+
+%---------------------------------------------------------------
+\section{MSI cevabı ve ISR}
+\satir{114--165}
+
+\todo{Vektörün her biti ayrı izlenir; her yükselen kenar yeni istektir.
+\kod{cfg\_interrupt\_msi\_sent}: istekten 3 clock sonra tek clock'luk darbe.
+\kod{msi\_pend} $\to$ \kod{irq\_vec}. ISR iş parçacığı: \kod{irq\_flag} bekle,
+\kod{asm.collecting} bitene kadar bekle, \kod{ISR\_LATENCY\_NS} bekle,
+\kod{cpu.run\_isr}. Kaçan kesme veriyi kaybettirmez, veri bir sonraki ISR'de okunur.}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+MSI biti & Anlamı \\
+\midrule
+bit0 & SİFPGA tamponu (\kod{BUF\_SIFPGA}) \\
+bit1 & SHOB-1 tamponu \\
+bit2 & SHOB-2 tamponu \\
+bit3 & IUB tamponu \\
+bit4, bit5 & RSİ (bu modelde yok sayılır) \\
+bit6 & MSI7: SİFPGA adres atama sonrası RSY kesmesi \\
+bit7..31 & Tanımsız, uyarı \\
+\bottomrule
+\end{tabular}
+\caption{RSY modelinin MSI vektörü. \todo{Doğrula.}}
+\end{table}
+
+%---------------------------------------------------------------
+\section{Huzme başı arayüzü ve CQ}
+\satir{167--186}
+
+\todo{\kod{beam\_if bif}: \kod{obs} tasarımdan gelen HB, \kod{gen} VIP'in ürettiği HB.
+\kod{axis\_tx\_if cq\_if}: CQ AXI-S sürücüsü, \kod{KEEP\_GRAN}.}
+
+%---------------------------------------------------------------
+\section{Senaryo motoru}
+\satir{188--231}
+
+\todo{Başlatma sırası: plusarg'lar, \kod{cpu} ve \kod{asm} kurulumu, \kod{mbx},
+\kod{beam}, \kod{drv}, \kod{gen}; \kod{drv.reset()}, \kod{drv.run()} arka planda,
+\kod{gen.run()}.}
+
+\subsection{\kod{generator}, \kod{driver}, \kod{beam\_ctrl} (\kod{scn\_pkg.sv})}
+\todo{Kısa özet; ayrıntı ayrı bir dokümanda: \kod{generator} dosyayı \kod{\$fgetc}
+ile okur ve \kod{scn\_cmd} üretir; \kod{driver} her TLP'yi CQ'ya sürer ve
+\kod{track\_cfg\_msgs}/\kod{maybe\_program} çağırır; \kod{beam\_ctrl} HB
+planlar/bekler.}
+
+%---------------------------------------------------------------
+\section{\kod{cpu\_pkg}: yardımcı sınıflar}
+
+\subsection{\kod{rq\_pkt} ve \kod{rq\_assembler}}
+\satir{cpu\_pkg 45--139}
+\todo{Descriptor düzeni (DW0 adres, DW1 adres üst, DW2 uzunluk ve tip); \kod{first\_be},
+\kod{last\_be}; \kod{decode}.}
+
+\subsection{\kod{cpu\_mem}}
+\satir{cpu\_pkg 147--188}
+\todo{Seyrek bayt adreslemeli bellek; \kod{read\_field}/\kod{write\_field}; yazılmamış
+adres okunursa 0 ve sayaç.}
+
+\subsection{\kod{cpu\_buffer}}
+\satir{cpu\_pkg 192--256}
+\todo{Alanlar: \kod{base}, \kod{size}, \kod{ptr\_addr}, \kod{last\_ptr},
+\kod{ptr\_width}, \kod{unread\_bytes}, \kod{overrun\_flag}; \kod{contains},
+\kod{in\_ptr}, \kod{ring\_addr} (sarma).}
+
+%---------------------------------------------------------------
+\section{\kod{cpu\_model}}
+\satir{cpu\_pkg 268--602}
+
+\subsection{Tampon programlama}
+\satir{324--385}
+\todo{\kod{1DEA0001} verisi 24.\ bayttan başlar. Her tampon 24 bayt: taban (8), boyut (8),
+işaretçi adresi (8). Sıra: SİFPGA, SHOB-1, SHOB-2, IUB. \kod{size = 0} kapalı;
+4'ün katı olmalı; örtüşme uyarısı; işaretçi başlangıçta tampon başı.}
+
+\subsection{FPGA'dan gelen TLP (\kod{on\_pkt})}
+\satir{402--478}
+\todo{Adrese göre tampon ya da işaretçi bulunur; bayt etkinliğine göre baytlar
+yazılır; tampon sonu aşılırsa başa sarılır; okunmamış bayt tampon boyutunu aşarsa
+TAŞMA; işaretçi yazımı ise değer okunur.}
+
+\subsection{ISR (\kod{run\_isr}, \kod{run\_isr\_buf})}
+\satir{485--571}
+\todo{Her set bit için: işaretçiyi oku, \kod{last\_ptr} ile arasını mesajlara böl
+(ID 4~B, LEN 4~B, veri \kod{LEN} bayt), dosyaya yaz, \kod{last\_ptr}'yi ilerlet.
+Hata durumları: işaretçi tampon dışında, mesaj yarım, LEN uyuşmuyor.}
+
+\subsection{Çıktı biçimi}
+\satir{586--591}
+\todo{Her mesaj bir satır: \kod{MSGID LEN BYTE0 BYTE1 \ldots} (hex). Örnek ekle.}
+
+\subsection{\kod{report}}
+\satir{593--601}
+
+%---------------------------------------------------------------
+\section{SİFPGA tamponundaki mesajlar}
+
+\todo{\kod{cpu\_out\_sifpga.txt} içinde gözlenen mesajlar: \kod{1DEA0002},
+\kod{1DEA0004}, \kod{1DEA001B}, \kod{1DEADEAD}. Ana dokümandaki Bölüm
+``Mesaj biçimleri'' ile tutarlı anlat. Anlamları tasarımcı teyidine bağlı.}
+
+%---------------------------------------------------------------
+\section{Sınırlar ve bilinen davranışlar}
+
+\begin{itemize}[nosep]
+  \item RSİ kesmeleri (bit4, bit5) bu modelde uygulanmadı, yok sayılır.
+  \item \kod{1DEA001B} ve \kod{1DEADEAD} yalnızca dosyaya yazılır, çözümlenmez.
+  \item Mesaj ID'leri dosyada ham hex satırı olarak görünür.
+  \item \todo{Diğer.}
+\end{itemize}
+
+\end{document}
