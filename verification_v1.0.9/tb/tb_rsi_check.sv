@@ -293,6 +293,9 @@ module tb_rsi_check;
         chk(count_in("rsi_out_rsi2.txt", "ADRES HATA") >= 1, "R3 RSI2 ADRES HATA satiri");
         chk(count_in("rsi_out_rsi3.txt", "HATA LEN uyusmuyor") >= 1, "R3 RSI3 eksik kelime: LEN uyusmuyor satiri");
         chk(count_in("rsi_tur_ozeti.txt", "BASARISIZ ya da YANLIS") >= 1, "R3 tur ozeti BASARISIZ/YANLIS");
+        chk(count_in("rsi_out_rsi3.txt", "TESHIS: gelen bayt - (8+LEN) = ") >= 1, "R3 RSI3 LEN farki tanilamasi yazildi");
+        chk(r_lendiff[3][2] != 0 && r_lendiff[1][2] == 0, "R3 LEN farki yalniz RSI3'te kaydedildi");
+        chk(count_in("rsi_tur_ozeti.txt", "LENFARK=") >= 1, "R3 ozet satirinda LENFARK");
 
         // ---------------- Tur 4: MSI2 (yazilamadi) ----------------
         cfg_huzpar(64'h0, 64'h0, 64'h0, 32'h0000A004, 4, 1, 4, 2, 1, 1);
@@ -325,11 +328,14 @@ module tb_rsi_check;
         cfg_huzpar(64'h0, 64'h0, 64'h0, 32'h0000A007, 4, 1, 4, 2, 1, 1);
         b1 = '{0, 1}; b2 = '{2}; b3 = '{3};
         fork
-            begin write_data(1, SA1, b1, 4, 3, 1'b0); msi(1, 0); end
+            begin msi(1, 2); repeat (60) @(posedge uclk[1]); write_data(1, SA1, b1, 4, 3, 1'b0); msi(1, 0); end   // once MSI3
             begin write_data(2, SA2, b2, 4, 3, 1'b0); msi(2, 0); end
             begin write_data(3, SA3, b3, 4, 3, 1'b0); msi(3, 0); end
         join
         repeat (100) @(posedge uclk[1]);
+        chk(r_msi3[1][6] == 1 && r_msi3[2][6] == 0, "R7 RSI1 tur 7 oncesi MSI3=1 sayildi, RSI2'de yok");
+        chk(count_in("rsi_tur_ozeti.txt", "TUR 7 huzme_id=0000a007") >= 1 && count_in("rsi_tur_ozeti.txt", " MSI3=1") >= 1, "R7 ozet satirinda MSI3=1");
+        chk(count_in("rsi_out_rsi1.txt", "TESHIS: bu turdan once SIFPGA 1 kez MSI3") >= 1, "R7 RSI1 dosyasinda MSI3 tanilamasi");
         chk(r_missing[1][5] && r_missing[2][5] && r_missing[3][5], "R6 tur 6 (veri yok): uc RSI'de VERI GELMEDI");
         chk(r_printed[5], "R6 tur 6 ozete yazildi");
         chk(r_reported[1][6] && !r_missing[1][6] && r_dogru[1][6] && r_dogru[2][6] && r_dogru[3][6],

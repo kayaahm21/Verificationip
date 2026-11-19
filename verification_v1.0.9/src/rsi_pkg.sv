@@ -79,6 +79,8 @@ package rsi_pkg;
     // ---- tur raporu: her RSI kendi turunu raporlar; hepsi raporlayinca birlesim kontrolu yapilir ----
     bit          r_reported [1:3][0:MAXR-1];
     bit          r_basarili [1:3][0:MAXR-1];    // MSI1 ile mi kapandi
+    int          r_msi3     [1:3][0:MAXR-1];    // v1.0.9: bu turdan once gelen MSI3 (SHOB verisi eksik) sayisi
+    int          r_lendiff  [1:3][0:MAXR-1];    // v1.0.9: gelen bayt - (8 + LEN); 0 = tutarli
     bit          r_missing  [1:3][0:MAXR-1];    // v1.0.9: bu RSI'ye bu tur icin hic veri gelmedi (SIFPGA reddetmis olabilir)
     bit          r_dogru    [1:3][0:MAXR-1];    // RSI'nin kendi kontrolleri gecti mi
     int          r_nbeam    [1:3][0:MAXR-1];
@@ -148,6 +150,8 @@ package rsi_pkg;
                 end else begin
                     line = {line, $sformatf(" | RSI%0d: %0s huzme=%0d %0s", k, r_basarili[k][tur] ? "YAZILDI" : "YAZILAMADI",
                                             r_nbeam[k][tur], r_dogru[k][tur] ? "DOGRU" : "YANLIS")};
+                    if (r_lendiff[k][tur] != 0) line = {line, $sformatf(" LENFARK=%0d", r_lendiff[k][tur])};
+                    if (r_msi3[k][tur] != 0)    line = {line, $sformatf(" MSI3=%0d", r_msi3[k][tur])};
                 end
                 if (r_missing[k][tur] || !r_basarili[k][tur] || !r_dogru[k][tur]) all_ok = 1'b0;
             end
@@ -182,6 +186,14 @@ package rsi_pkg;
         for (int t = rsi_tur_idx[rsi]; t < t_count; t++)
             if (t_nk[rsi][t] > 0) rsi_report_missing(rsi, t);
         rsi_tur_idx[rsi] = t_count;
+    endfunction
+
+    // v1.0.9: tanilama bilgileri (RSI modeli yazar, tur ozeti okur)
+    function automatic void rsi_set_msi3(int rsi, int tur, int n);
+        if (tur >= 0 && tur < MAXR) r_msi3[rsi][tur] = n;
+    endfunction
+    function automatic void rsi_set_lendiff(int rsi, int tur, int d);
+        if (tur >= 0 && tur < MAXR) r_lendiff[rsi][tur] = d;
     endfunction
 
 endpackage

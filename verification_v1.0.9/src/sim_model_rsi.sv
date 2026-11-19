@@ -185,7 +185,10 @@ module sim_model_rsi #(
         logf($sformatf("%0t ISR #%0d vektor=%h (MSI1=%b MSI2=%b MSI3=%b MSI4=%b)", $time, isr_count, vec,
                        vec[0], vec[1], vec[2], vec[3]));
         $display("[%0t] [RSI%0d] ISR #%0d vektor=%h", $time, RSI_ID, isr_count, vec);
-        if (vec[2]) logf($sformatf("%0t MSI3: SHOB->SIFPGA kanal verisi EKSIK geldi (bu surumde hata enjeksiyonu yok; beklenmiyordu)", $time));
+        if (vec[2]) begin
+            msi3_pending++;
+            logf($sformatf("%0t MSI3: SHOB->SIFPGA kanal verisi EKSIK geldi (SIFPGA bildirimi; bu turun verisi bozuk/atlanmis olabilir; son turdan beri %0d kez)", $time, msi3_pending));
+        end
         if (vec[3]) logf($sformatf("%0t MSI4: SHOB->SIFPGA kanal verisi GELMEDI (bu surumde hata enjeksiyonu yok; beklenmiyordu)", $time));
         if (vec[31:4] != 0) logf($sformatf("%0t UYARI tanimsiz MSI bitleri: %h", $time, vec & 32'hFFFF_FFF0));
         if (vec[0] || vec[1]) process_round(vec[0] && !vec[1]);
@@ -284,11 +287,14 @@ module sim_model_rsi #(
     endfunction
 
     int round_no = 0;
+    int msi3_pending = 0;      // v1.0.9: son turdan beri gelen MSI3 sayisi
+    int prev_nbytes  = 0;      // v1.0.9: bir onceki turda gelen toplam bayt
 
     // ---------------- Turu kapat: coz, dogrula, dok, temizle ----------------
     task automatic process_round(bit basarili);
         bit [63:0]   cur;
         int          tur_seq;
+        int          pn, msi3_n, lendiff, exp_total;
         bit [31:0]   hid_pk;
         int          tur, nwords, nbytes, errors, warns, i, j, c, n, tail_w, data_bytes;
         int          k_best, best_ok, ok_k, npair, nbeams, detail_n, bad_samples, dup_beams, gaps, nk_exp;
@@ -314,6 +320,8 @@ module sim_model_rsi #(
         end
         nwords = keys_m.size();
         nbytes = nwords * 4;
+        pn = prev_nbytes;  prev_nbytes = nbytes;        // v1.0.9: tanilama
+        msi3_n = msi3_pending;  msi3_pending = 0;
 
         // ---- v1.0.9: tur eslemesi huzme ID'ye gore ----
         // Mesaj ID=2 ise header'daki huzme ID'sini tasiyan (bu RSI'ye veri verilecek) ilk tur secilir; arada kalan
@@ -333,6 +341,8 @@ module sim_model_rsi #(
             end
         end
         rsi_tur_idx[RSI_ID] = tur + 1;
+        rsi_set_msi3(RSI_ID, tur, msi3_n);
+        rsi_set_lendiff(RSI_ID, tur, 0);
         has_t = tur_var(tur);
         nk_exp = has_t ? int'(t_nk[RSI_ID][tur]) : 0;
         logf("");
@@ -342,6 +352,8 @@ module sim_model_rsi #(
                            $time, tur + 1, tur_seq + 1, tur - tur_seq));
         logf($sformatf("%0t alinan MemWr=%0d, kelime=%0d (%0d bayt), atilan kelime=%0d, kismi be uyarilari=%0d",
                        $time, wr_count, nwords, nbytes, dropped, partial_be_warn));
+        if (msi3_n != 0)
+            logf($sformatf("%0t TESHIS: bu turdan once SIFPGA %0d kez MSI3 (SHOB verisi eksik) bildirdi", $time, msi3_n));
         if (nwords == 0) begin
             logf($sformatf("%0t HATA bu turda hic veri yazilmamis", $time));
             rsi_report_round(RSI_ID, tur, basarili, 1'b0, 0, 0);
@@ -389,9 +401,22 @@ module sim_model_rsi #(
             logf($sformatf("%0t HATA mesaj ID 00000002 olmali, gelen %h", $time, id));
             errors++;
         end
+        lendiff = nbytes - (8 + int'(len));
+        rsi_set_lendiff(RSI_ID, tur, lendiff);
         if (8 + len != nbytes) begin
             logf($sformatf("%0t HATA LEN uyusmuyor: 8 + LEN = %0d, gelen %0d bayt", $time, 8 + len, nbytes));
             errors++;
+            logf($sformatf("%0t TESHIS: gelen bayt - (8+LEN) = %0d bayt (%0s)", $time, lendiff,
+                           (lendiff > 0) ? "fazla: MSI'siz onceki (reddedilmis) turun artigi olabilir"
+                                         : "eksik: mesaj kesilmis ya da yazim eksik kalmis"));
+            if (nbytes == pn && pn != 0)
+                logf($sformatf("%0t TESHIS: gelen boyut (%0d bayt) bir onceki turun boyutuyla ayni: SIFPGA mesaj uzunlugunu guncellememis olabilir", $time, nbytes));
+        end
+        if (has_t) begin
+            exp_total = (HDR_WORDS + TAIL_WORDS) * 4 + 8 * int'(t_nsample[tur]) * nk_exp;
+            if (8 + int'(len) != exp_total)
+                logf($sformatf("%0t TESHIS: 1DEA0003'e gore beklenen toplam %0d bayt (N=%0d, K=%0d); LEN'deki toplam %0d bayt", $time,
+                               exp_total, t_nsample[tur], nk_exp, 8 + int'(len)));
         end
 
         // ---- HEADER (88 B): kelime 2..23 ----
