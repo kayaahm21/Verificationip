@@ -1,0 +1,471 @@
+% SİFPGA Doğrulama VIP Seti - Tasarım Dokümanı (taslak)
+% Overleaf: pdfLaTeX ile derlenir (Menü -> Compiler -> pdfLaTeX).
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[turkish]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{textcomp}
+\usepackage{amssymb}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\renewcommand{\arraystretch}{1.2}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{SİFPGA Doğrulama VIP Seti}
+\rhead{Tasarım Dokümanı (taslak)}
+\cfoot{\thepage}
+
+% Kısayollar
+\newcommand{\us}{\,\textmu{}s}
+\newcommand{\kod}[1]{\texttt{#1}}
+\newcommand{\acik}[1]{\textcolor{red!60!black}{\textbf{[AÇIK]} #1}}
+
+% TikZ stilleri
+\tikzset{
+  kutu/.style={draw=black!60, rounded corners=3pt, align=center,
+               minimum height=1.1cm, inner sep=4pt, font=\small},
+  ana/.style={kutu, draw=blue!70!black, fill=blue!8, very thick},
+  ok/.style={-{Stealth[length=2.2mm]}, thick, black!70},
+  etiket/.style={font=\scriptsize, text=black!70}
+}
+
+\title{\textbf{SİFPGA Doğrulama VIP Seti}\\[0.3em]
+       \large Tasarım Dokümanı (taslak)}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%---------------------------------------------------------------
+\section{Amaç ve kapsam}
+
+Bu VIP seti, radar sinyal işleme FPGA'sını (SİFPGA) gerçek RTL ile birlikte
+Vivado/xsim ortamında doğrular. CPU'dan hüzme parametreleri gelir, iki SHOB
+kartından Aurora ile veri gelir, SİFPGA sonucu PCIe üzerinden RSİ belleğine
+yazar ve MSI kesmesi üretir.
+
+\paragraph{Kapsam içi}
+\begin{itemize}[nosep]
+  \item Hüzme turu akışı: HB planlama, hüzme parametre mesajları (HUZPAR),
+        SHOB hüzme verisi, RSİ çıktısı.
+  \item Çoklu hüzme modu ve tur başına rastgele parametre (M, darbe, örnek sayısı).
+  \item RSİ çıktısının deterministik veri deseniyle sayısal doğrulaması.
+  \item SİFPGA'dan gelen MSI1--MSI4 kesmelerinin kaydı.
+\end{itemize}
+
+\paragraph{Kapsam dışı}
+\begin{itemize}[nosep]
+  \item Tasarımcıya ait \kod{Top.vhd} ve \kod{PcieTop.vhd} dosyaları değiştirilmez.
+  \item Hata enjeksiyonu (MSI3/MSI4 üretimi) ve \kod{0x00000003} (Bypass) RSİ
+        mesajı henüz modellenmedi.
+  \item \kod{1DEA001B} (hüzme veri durumu) ve \kod{1DEADEAD} (hata) mesajlarının
+        çözümleyicisi henüz yok; anlamları tasarımcıdan teyit bekliyor.
+\end{itemize}
+
+%---------------------------------------------------------------
+\section{Mimari genel bakış}
+
+Senaryo okuyucu tek bir metin dosyasını okur ve CPU/PCIe, iki SHOB ve HB
+sürücülerini yönlendirir. SİFPGA'nın çıktısı PCIe RQ üzerinden RSİ modeline
+gider; model MSI'ları da kaydeder.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=0.5cm and 1.3cm]
+  \node[kutu, text width=2.6cm] (okuyucu) {\textbf{Senaryo okuyucu}\\ metin dosyası,\\ \kod{\$fgetc} ile akış};
+  \node[kutu, text width=3.0cm, right=1.3cm of okuyucu, yshift=2.4cm] (cpu)
+        {\textbf{CPU / PCIe VIP}\\ \kod{1DEA0001}, \kod{1DEA0003},\\ IUB, SHOB hüzpar};
+  \node[kutu, text width=3.0cm, below=0.5cm of cpu] (s1)
+        {\textbf{SHOB-1 VIP}\\ Aurora hüzme verisi\\ HB'den 5\us{} sonra};
+  \node[kutu, text width=3.0cm, below=0.5cm of s1] (s2)
+        {\textbf{SHOB-2 VIP}\\ Aurora hüzme verisi\\ HB'den 5\us{} sonra};
+  \node[kutu, text width=3.0cm, below=0.5cm of s2] (hb)
+        {\textbf{HB üreteci}\\ planlı HB darbesi\\ \kod{77777777} komutu};
+  \node[ana, minimum height=7.6cm, text width=1.6cm, right=1.6cm of s1, yshift=-1.0cm] (sif)
+        {\textbf{SİFPGA}\\ doğrulanan RTL};
+  \node[kutu, text width=2.4cm, right=1.6cm of sif] (rsi)
+        {\textbf{RSİ modeli}\\ ID ile eşleştirir\\ deseni denetler\\ MSI'ları kaydeder};
+
+  \foreach \n in {cpu,s1,s2,hb}{
+    \draw[ok] (okuyucu.east) -- ++(0.5,0) |- (\n.west);
+  }
+  \draw[ok] (cpu.east) -- node[etiket,above]{PCIe CQ} (cpu.east -| sif.west);
+  \draw[ok] (s1.east)  -- node[etiket,above]{Aurora}  (s1.east -| sif.west);
+  \draw[ok] (s2.east)  -- node[etiket,above]{Aurora}  (s2.east -| sif.west);
+  \draw[ok] (hb.east)  -- node[etiket,above]{HB}      (hb.east -| sif.west);
+  \draw[ok] (sif.east) -- node[etiket,above]{PCIe RQ} node[etiket,below]{MSI} (rsi.west);
+\end{tikzpicture}
+\caption{Doğrulama ortamı: dört sürücü, SİFPGA ve RSİ modeli.}
+\end{figure}
+
+%---------------------------------------------------------------
+\section{Arayüzler}
+
+Tüm CPU ve SHOB trafiği SİFPGA'nın PCIe uç noktasına BAR numarasıyla yönlenir;
+SHOB hüzme verisi ise Aurora ile ayrı gelir.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Arayüz & Yön & Açıklama \\
+\midrule
+PCIe CQ (AXI-S, 256 bit) & VIP $\to$ SİFPGA & CPU, IUB ve SHOB hüzpar yazımları \\
+PCIe RQ (AXI-S, 256 bit) & SİFPGA $\to$ VIP & RSİ bellek yazımları, MSI \\
+Aurora (SHOB-1, SHOB-2) & SHOB VIP $\to$ SİFPGA & Hüzme verisi, HB'den sonra gecikmeli \\
+HB & VIP $\to$ SİFPGA & Hüzme başı darbesi, \kod{77777777} ile planlanır \\
+\bottomrule
+\end{tabular}
+\caption{Arayüzler.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+BAR & Hedef \\
+\midrule
+BAR0 & SİFPGA (CPU mesajları: \kod{1DEA0001}, \kod{1DEA0003}) \\
+BAR1 & SHOB-1 hüzpar (\kod{0000E001}) \\
+BAR2 & SHOB-2 hüzpar (\kod{0000E001}) \\
+BAR3 & IUB mesajı (\kod{00000001}) \\
+\bottomrule
+\end{tabular}
+\caption{BAR haritası.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+MSI & Anlamı & Kaynak \\
+\midrule
+MSI1 & RSİ mesajı yazıldı & SİFPGA \\
+MSI2 & RSİ yazımı başarısız & SİFPGA \\
+MSI3 & SHOB$\to$SİFPGA kanal verisi eksik & SİFPGA \\
+MSI4 & SHOB verisi alınamadı & SİFPGA \\
+\bottomrule
+\end{tabular}
+\caption{MSI kesmeleri. MSI'ları SİFPGA üretir; RSİ modeli yalnızca alıp loga yazar.}
+\end{table}
+
+%---------------------------------------------------------------
+\section{Senaryo dili ve üretici}
+
+Tüm girdi tek bir metin dosyasıdır; her satır bir PCIe yazımı ya da bir
+zamanlama komutudur.
+
+\paragraph{Satır biçimi.}
+\kod{ADRES [BAR<n>] MSGID LEN DATA...} Veri baytları küçük-endian dizilir.
+32 DWORD'den uzun mesajlar otomatik olarak 32 DWORD'lük TLP'lere bölünür.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Komut & Anlamı \\
+\midrule
+\kod{77777777 <ns>} & Bir sonraki HB'yi \kod{<ns>} sonraya planla \\
+\kod{99999999} & Planlı HB'yi bekle \\
+\kod{88888888 <ns>} & \kod{<ns>} bekle \\
+\bottomrule
+\end{tabular}
+\caption{Zamanlama komutları.}
+\end{table}
+
+\paragraph{Okuyucu.}
+Senaryo dosyası \kod{\$fgetc} ile akış olarak okunur. 550~KB'lık satırları
+\kod{\$fgets} ile belleğe almak xsim'de bellek ve süre sorunu çıkardığından
+v1.0.8'de bu yöntem bırakıldı.
+
+\paragraph{Üreticiler (\kod{tools/}).}
+\begin{itemize}[nosep]
+  \item \kod{gen\_huzme\_rounds.py}: sabit parametreli turlar için yardımcı
+        fonksiyonlar (\kod{le}, \kod{line}, \kod{shob\_huzpar}, \kod{iub\_huzpar},
+        \kod{sifpga\_huzpar}).
+  \item \kod{gen\_huzme\_random.py}: tur başına rastgele M, darbe, örnek ve RSİ
+        başına hüzme dağılımı üretir. Seçenekler: \kod{--count}, \kod{--seed},
+        \kod{--m-max} (12), \kod{--n-max} (64), \kod{--darbe-max}, \kod{--ornek-max},
+        \kod{--gaps-us} (20,30), \kod{--huzme-id}.
+  \item Tur sırası: \kod{77777777}, \kod{1DEA0003}, IUB (BAR3), SHOB-1 (BAR1),
+        SHOB-2 (BAR2), \kod{99999999}, \kod{88888888 <boşluk>}. Hüzme ID'si her
+        turda 1 artar.
+\end{itemize}
+
+%---------------------------------------------------------------
+\section{Hüzme turu akışı}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=0.55cm]
+  \node[kutu, text width=10.5cm] (a) {\textbf{Planlama} \quad \kod{77777777} komutu HB'yi planlar};
+  \node[kutu, text width=10.5cm, below=of a] (b) {\textbf{HUZPAR} \quad \kod{1DEA0003}, IUB, SHOB-1, SHOB-2 PCIe ile gider};
+  \node[ana, text width=10.5cm, below=of b] (c) {\textbf{HB} \quad HB darbesi (periyot en az 60\us)};
+  \node[kutu, text width=10.5cm, below=of c] (d) {\textbf{SHOB verisi} \quad Her iki SHOB HB'den 5\us{} sonra Aurora ile basar};
+  \node[kutu, text width=10.5cm, below=of d] (e) {\textbf{RSİ yazımı} \quad SİFPGA belleğe yazar, MSI1 gelir (MSI3 bazı turlarda)};
+  \node[kutu, text width=10.5cm, below=of e] (f) {\textbf{Bekleme} \quad \kod{88888888}: 20/30/100\us, sonra yeni tur};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f}{ \draw[ok] (\x.south) -- (\y.north); }
+  \draw[ok] (f.east) -- ++(0.7,0) |- node[etiket,pos=0.25,right]{yeni tur} (a.east);
+\end{tikzpicture}
+\caption{Bir hüzme turunun adımları (zamana ölçekli değil).}
+\end{figure}
+
+MSI3, bazı turlarda MSI1'den önce gelir ve veriyi bozmaz. Boşluk 20/30\us{}
+olduğunda büyük N'li turlardan sonra bazı turlar başarısız olur; 100\us{}'de
+olmaz (bkz.\ Bölüm~\ref{sec:gozlem}).
+
+%---------------------------------------------------------------
+\section{Mesaj biçimleri}
+
+Tüm alanlar küçük-endian'dır.
+
+\subsection{CPU $\to$ SİFPGA}
+
+\begin{longtable}{@{}p{2.6cm}p{1.6cm}p{10.2cm}@{}}
+\toprule
+Mesaj & Boyut & İçerik \\
+\midrule
+\endhead
+\kod{1DEA0001} & 124 B & 4 tampon tanımı (taban, boyut, işaretçi; 8~B'lık alanlar),
+96..119 arası 3 RSİ başlangıç adresi, RSİ sayısı, kesme aralığı (\textmu{}s) \\
+\kod{1DEA0003} & 56 B & Hüzme parametresi (aşağıda) \\
+IUB \kod{00000001} & BAR3 & IUB hüzpar'ı \\
+SHOB \kod{0000E001} & BAR1/2 & SHOB hüzpar'ı \\
+\bottomrule
+\end{longtable}
+
+\paragraph{\kod{1DEA0003} alanları (56 B).}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Bayt & Alan \\
+\midrule
+0--23 & 3 adet 8~B RSİ ofseti \\
+24--27 & Hüzme ID \\
+28--29 & M (toplam hüzme sayısı) \\
+30--31 & Darbe sayısı \\
+32--33 & Örnek sayısı \\
+34 & SHOB kullanım (03) \\
+35 & Mod (0 = HO) \\
+36--38 & $n_1, n_2, n_3$: RSİ başına hüzme sayısı (toplam $=M$) \\
+39--55 & Ayrılmış \\
+\bottomrule
+\end{tabular}
+\caption{\kod{1DEA0003} yerleşimi.}
+\end{table}
+
+$N = \text{darbe} \times \text{örnek}$. Bir RSİ mesajındaki kanal sayısı $K$,
+ilgili $n$ değerine eşittir.
+
+\subsection{SHOB Aurora verisi}
+
+Kimlik 2, ardından $\mathrm{LEN} = 56 + M\cdot N\cdot 8 + 960 + 16 + 16$ bayt:
+başlık, örnekler (örnek-ana sıra, int32 I ve Q), kuyruk alanları.
+
+\subsection{RSİ mesajı (SİFPGA $\to$ bellek)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Alan & Boyut \\
+\midrule
+ID ($=2$), LEN & 4~B + 4~B \\
+Başlık & 88~B \\
+Kanal başına $N$ adet I, sonra $N$ adet Q (float32) & $8N$~B her kanal için \\
+GAC SCIT & 1920~B \\
+SHOB SCIT & 32~B \\
+SİBFPGA SCIT & 16~B \\
+Alt bilgi (\kod{AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD}) & 16~B \\
+\bottomrule
+\end{tabular}
+\caption{RSİ mesaj yerleşimi.}
+\end{table}
+
+Sabit kısım 2080~B'tır:
+\[
+  K = \frac{\text{toplam bayt} - 2080}{8\,N}.
+\]
+
+\subsection{SİFPGA $\to$ CPU (gözlenen)}
+
+Anlamlar kısmen tahmindir.
+
+\begin{longtable}{@{}p{2.6cm}p{12.3cm}@{}}
+\toprule
+Mesaj & Gözlem \\
+\midrule
+\endhead
+\kod{1DEA0002} & \kod{1DEA0001} onayı \\
+\kod{1DEA0004} & \kod{1DEA0003} olumlu cevabı: hüzme ID + durum 0 \\
+\kod{1DEA001B} & 16 B: ID, A, 0, B. Normal turda tümü sıfır; MSI3'lü turda iki rapor
+(ID$-$1 ile A$=1$, sonra ID ile A$=0$), B$=3$ \\
+\kod{1DEADEAD} & 8 B: ID + hata kodu. 0x0F, ID mod 4 $=3$ olan her turda geliyor;
+anlamı bilinmiyor \\
+\bottomrule
+\end{longtable}
+
+%---------------------------------------------------------------
+\section{Veri deseni ve beklenen sonuç}
+
+SHOB verisi örnek ve hüzme indeksinden üretilen deterministik bir desendir;
+SİFPGA iki SHOB'u topladığından RSİ'de beklenen değer üç katıdır.
+
+\begin{itemize}[nosep]
+  \item Kod: $\mathrm{kod} = ((m+1) \ll 15)\,|\,(n \mathbin{\&} \mathtt{0x7FFF})$;
+        $m$ hüzme, $n$ örnek indeksi.
+  \item SHOB-1: $I = +1\cdot\mathrm{kod}$, $Q = -1\cdot\mathrm{kod}$.
+        SHOB-2: $I = +2\cdot\mathrm{kod}$, $Q = -2\cdot\mathrm{kod}$.
+  \item Toplam: $I = 3\,\mathrm{kod}$, $Q = -3\,\mathrm{kod}$.
+        Örnek: $m=0$ için $I = 98304 + 3n$.
+  \item RSİ değerleri float32'dir; değerler $2^{24}$'ten küçük olduğundan
+        tam gösterilir.
+\end{itemize}
+
+\paragraph{Zamanlama.}
+SHOB VIP verisi, HUZPAR'dan sonraki ilk HB'den \kod{DATA\_DELAY\_CLKS} $=625$ clk
+(5\us) sonra başlatır. HB, HUZPAR mesajlarından sonra gelmelidir; üretici HB
+periyodunu $\max(60\us,\ 20\us + 3\us\times M)$ seçer.
+
+%---------------------------------------------------------------
+\section{RSİ modeli ve doğrulama kuralları}
+
+RSİ modeli (\kod{sim\_model\_rsi.sv}, \kod{rsi\_pkg.sv}) her gelen mesajı hüzme
+ID'siyle bir tura eşler, $K$'yı bayt sayısından hesaplar ve her örneği beklenen
+desenle karşılaştırır.
+
+\begin{enumerate}[nosep]
+  \item \textbf{Eşleştirme:} Başlıktaki hüzme ID'sine göre tur seçilir. Beklenen
+        sıradan ileri atlanırsa aradaki turlar ``VERI GELMEDI'' sayılır ve loga
+        \kod{ESLESME} satırı yazılır. Sıralı eşleştirme, reddedilen bir turdan
+        sonra yanlış zincirleme hataya yol açıyordu.
+  \item \textbf{K doğrulaması:} $K=(\text{bayt}-2080)/(8N)$. \kod{1DEA0003}'teki
+        $n$ değeriyle uyuşmazsa hata.
+  \item \textbf{Boyut doğrulaması:} Gelen bayt sayısı $8+\mathrm{LEN}$ ile
+        karşılaştırılır; fark \kod{LENFARK} olarak raporlanır. Gelen boyut önceki
+        turla aynıysa teşhis satırı bunu belirtir.
+  \item \textbf{Sayısal kontrol:} Örnek başına I ve Q, toplam kuralıyla
+        ($\times 3$) karşılaştırılır; GAC/SHOB/SİBFPGA SCIT ve alt bilgi ayrıca
+        kontrol edilir.
+  \item \textbf{MSI kaydı:} MSI3 sayısı bir sonraki turun \kod{TESHIS} satırında
+        gösterilir.
+\end{enumerate}
+
+Tur sonucu üç değerden biridir: DOĞRU, YANLIŞ, VERİ GELMEDİ. Sonunda
+\kod{rsi\_tur\_ozeti} dosyası tüm turları özetler.
+
+%---------------------------------------------------------------
+\section{Gözlenen davranışlar ve sınırlar}
+\label{sec:gozlem}
+
+Aşağıdakiler gerçek SİFPGA ile yapılan koşulardan çıkarılan gözlemlerdir;
+tasarımcı teyidi bekliyor.
+
+\begin{longtable}{@{}p{3.2cm}p{11.7cm}@{}}
+\toprule
+Konu & Gözlem \\
+\midrule
+\endhead
+$M=16$ & Hep reddedildi (NAK, hata kodu 03: hatalı hüzme sayısı parametresi) \\
+$N$ sınırı & $M\le 8$'de $N\ge 80$ reddedildi; $M=12$'de $N=112$'ye kadar kabul edildi \\
+Reddedilen tur & RSİ'ye yine yazım yapılıyor, boyut bir önceki turunki \\
+Turlar arası süre & 20/30\us{} boşluk, $N\ge 56$ turundan sonra 4/100 tur başarısız
+(2 kayıp, 2 eski boyutlu). 100\us{} boşlukta 100/100 doğru \\
+MSI3 & 100\us{} koşusunda 99 turun 61'inde var, boşluktan bağımsız. HB döngüsünde
+sabit fazda geliyor, MSI1'den 6--9\us{} önce. MSI3'lü turlar yine de doğru veriyle
+bitiyor \\
+\kod{1DEA001B} & MSI3 olan turlarla birebir eşleşiyor \\
+\kod{1DEADEAD} 0x0F & ID mod 4 $=3$ olan 25 turun hepsinde, MSI3'ten ve boyuttan
+bağımsız; RSİ verisi doğru \\
+\bottomrule
+\end{longtable}
+
+$n_1/n_2/n_3$ dağılımının kabul için bir kuralı olmadığı görüldü. MSI3 hakkında
+``SHOB-2 verisi kontrol anına yetişmiyor'' tahmini var, test edilmedi.
+
+%---------------------------------------------------------------
+\section{Açık sorular ve varsayımlar}
+
+\begin{itemize}[label=$\square$]
+  \item \kod{1DEADEAD} hata kodu 0x0F ne demek ve neden ID mod 4 $=3$ olan
+        turlarda geliyor? Hangi mesaja cevap veriyor?
+  \item \kod{1DEA001B} alanları A ve B ne? Neden MSI3'lü turda önceki ID için de
+        rapor geliyor?
+  \item MSI3 hangi koşulda ve HB'den kaç \textmu{}s sonra üretiliyor? SHOB verisinin
+        HB'ye göre en geç başlama zamanı nedir?
+  \item Kabul sınırları: M üst sınırı, N üst sınırı ve hata kodu 03'ün kesin koşulu.
+  \item Reddedilen turda neden önceki turun boyutuyla yazım yapılıyor?
+  \item Büyük bir turdan sonra yeni tur kabul etmek için asgari süre nedir?
+        (20--30\us{} yetmiyor, 100\us{} yetiyor.)
+  \item IUB cevabındaki ``hüzme başı zamanı'' birimi ve çözünürlüğü (ns, 5~ns?).
+  \item RSİ tarafı: eksik ya da eski ID'li turlar gerçek RSİ'de nasıl işleniyor?
+        \kod{0x00000003} (Bypass) mesajı ne zaman kullanılıyor?
+\end{itemize}
+
+\paragraph{Varsayımlar.}
+M ve N sınırları gözlemden çıkarılmıştır. SHOB üzerindeki toplam kuralı ($\times3$)
+tüm turlarda tutuyor, ama tasarım belgesinden teyit edilmedi.
+
+%---------------------------------------------------------------
+\section{Çalıştırma ve test}
+
+Set karma Verilog/SystemVerilog olduğundan Vivado xsim 2020.2 ile çalışır; birim
+testleri Verilator ile koşulur.
+
+\begin{itemize}[nosep]
+  \item \textbf{Sürüm klasörleri:} \kod{verification\_v1.0.7} (dokunulmaz taban),
+        \kod{verification\_v1.0.8} (akış okuyucu), \kod{verification\_v1.0.9} (güncel).
+  \item \textbf{Verilator:} \kod{test/run\_verilator.sh} 9 testi çalıştırır; her
+        v1.0.9 commit'inde geçti.
+  \item \textbf{Bellek teşhisi:} \kod{test/xsim\_bellek\_teshis/} xsim'de bellek
+        tüketiminin hangi aşamada olduğunu ayırmak için kullanılır.
+  \item \textbf{xsim sınırları:} Fonksiyon içinden task çağrılamaz; çıkış
+        argümanları ve diziler dikkat ister.
+  \item \textbf{Örnek girdiler} (\kod{examples/}):
+        \kod{input\_huzme\_100\_rastgele.txt} (20/30\us{} boşluk),
+        \kod{input\_huzme\_100\_rastgele\_bosluk100us.txt} (100\us),
+        \kod{input\_huzme\_nak\_teshis.txt} (M/N sınır ayrıştırma),
+        \kod{input\_huzme\_MAX\_tek\_huzme.txt}.
+  \item \textbf{Çıktılar:} RSİ modeli tur ayrıntılarını ve \kod{rsi\_tur\_ozeti}
+        özetini yazar. Referans doğrulama için 100\us{} boşluklu dosya önerilir.
+\end{itemize}
+
+%---------------------------------------------------------------
+\section{Sürüm geçmişi}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lp{12cm}@{}}
+\toprule
+Sürüm & Değişiklik \\
+\midrule
+v1.0.9 & RSİ modeli hüzme ID'siyle eşleştirir; kayıp tur, LENFARK ve MSI3 teşhisleri;
+SİFPGA kabul sınırlarına göre rastgele üretici; 100\us{} boşluklu dosya \\
+v1.0.8 & Senaryo dosyası \kod{\$fgetc} ile akış olarak okunur (xsim'de 17--32~GB
+bellek sorununu giderir) \\
+v1.0.7 & Taban sürüm; değiştirilmeden saklanıyor \\
+\bottomrule
+\end{tabular}
+\caption{Sürüm geçmişi.}
+\end{table}
+
+\end{document}
