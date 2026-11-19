@@ -1,0 +1,3 @@
+test/work/
+*.log
+__pycache__/
